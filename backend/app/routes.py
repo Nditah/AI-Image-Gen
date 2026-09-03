@@ -14,6 +14,13 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _safe_error_message(message: str, fallback: str) -> str:
+    lowered = message.lower()
+    if "traceback" in lowered or "\n" in message:
+        return fallback
+    return message[:300] if message else fallback
+
+
 @router.post("/generate", response_model=GenerateImageResponse)
 async def generate_image(payload: GenerateImageRequest, x_session_id: str | None = Header(default=None)) -> GenerateImageResponse:
     session_id = x_session_id or str(uuid4())
@@ -48,10 +55,16 @@ async def generate_image(payload: GenerateImageRequest, x_session_id: str | None
         return GenerateImageResponse(image_base64=image_base64, provider=provider)
     except ProviderConfigError as exc:
         logger.warning("Provider configuration error: %s", exc)
-        return JSONResponse(status_code=exc.status_code, content={"error": str(exc), "provider": exc.provider})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": _safe_error_message(str(exc), "Provider configuration error"), "provider": exc.provider},
+        )
     except ProviderRuntimeError as exc:
         logger.exception("Provider runtime error")
-        return JSONResponse(status_code=exc.status_code, content={"error": str(exc), "provider": exc.provider})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": _safe_error_message(str(exc), "Provider request failed"), "provider": exc.provider},
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled image generation error")
         return JSONResponse(
