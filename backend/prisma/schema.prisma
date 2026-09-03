@@ -7,11 +7,239 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+/// Account lifecycle. Banned users must not generate images.
+enum AccountStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+/// Versioned legal/ethical documents a user must accept before generating.
+enum PolicyKind {
+  TERMS_OF_SERVICE
+  ACCEPTABLE_USE
+  PRIVACY
+  AGE_GATE
+}
+
+enum SafetyStatus {
+  PENDING
+  ALLOWED
+  FLAGGED
+  BLOCKED
+  REMOVED
+}
+
+/// Categories aligned with typical image-generator acceptable-use rules.
+enum ViolationCategory {
+  CSAM
+  NON_CONSENSUAL_INTIMATE
+  REAL_PERSON_WITHOUT_CONSENT
+  HATE_OR_HARASSMENT
+  VIOLENT_EXTREMISM
+  COPYRIGHT_INFRINGEMENT
+  DECEPTIVE_DEEPFAKE
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  UNDER_REVIEW
+  ACTIONED
+  DISMISSED
+}
+
+enum ModerationActionType {
+  WARN
+  SUSPEND
+  BAN
+  REINSTATE
+  REMOVE_CONTENT
+}
+
+enum AuthEventType {
+  REGISTER
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  PASSWORD_RESET
+  EMAIL_VERIFIED
+}
+
+model User {
+  id              String        @id @default(cuid())
+  email           String        @unique
+  emailVerifiedAt DateTime?
+  /// Null when the user signs in only through an external identity provider.
+  passwordHash    String?
+  displayName     String?
+  role            UserRole      @default(USER)
+  status          AccountStatus @default(PENDING_VERIFICATION)
+  suspendedUntil  DateTime?
+
+  /// User attested they meet the minimum age (18+) for this service.
+  isAdult       Boolean   @default(false)
+  ageAttestedAt DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastLoginAt DateTime?
+
+  identities         AuthIdentity[]
+  sessions           AuthSession[]
+  consents           UserConsent[]
+  promptLogs         PromptLog[]
+  reportsFiled       ContentReport[]    @relation("ReportsFiled")
+  moderationReceived ModerationAction[] @relation("ModerationTarget")
+  moderationIssued   ModerationAction[] @relation("ModerationActor")
+  authEvents         AuthEvent[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// Local password or OAuth/OIDC identity linked to a user.
+model AuthIdentity {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider       String
+  providerUserId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+}
+
+model AuthSession {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AuthEvent {
+  id        String        @id @default(cuid())
+  userId    String?
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type      AuthEventType
+  ipAddress String?
+  userAgent String?
+  metadata  String?
+  createdAt DateTime      @default(now())
+
+  @@index([userId])
+  @@index([type, createdAt])
+}
+
+model PolicyDocument {
+  id          String        @id @default(cuid())
+  kind        PolicyKind
+  version     String
+  effectiveAt DateTime
+  summary     String?
+  createdAt   DateTime      @default(now())
+  consents    UserConsent[]
+
+  @@unique([kind, version])
+  @@index([kind, effectiveAt])
+}
+
+/// Immutable record that a user accepted a specific policy version.
+model UserConsent {
+  id               String         @id @default(cuid())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policyDocumentId String
+  policyDocument   PolicyDocument @relation(fields: [policyDocumentId], references: [id], onDelete: Restrict)
+  acceptedAt       DateTime       @default(now())
+  ipAddress        String?
+
+  @@unique([userId, policyDocumentId])
+  @@index([userId])
+}
+
 model PromptLog {
-  id          Int      @id @default(autoincrement())
+  id          Int     @id @default(autoincrement())
+  userId      String?
+  user        User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Client correlation id from X-Session-Id (not the same as AuthSession).
   sessionId   String
   promptText  String
   imageBase64 String
   provider    String
-  createdAt   DateTime @default(now())
+
+  /// Required attestation: prompt complies with the acceptable-use policy.
+  attestedEthicalUse         Boolean @default(false)
+  /// Required attestation: not a non-consensual depiction of a real person.
+  attestedNoRealPersonMisuse Boolean @default(false)
+
+  safetyStatus       SafetyStatus       @default(PENDING)
+  safetyNotes        String?
+  blockedReason      String?
+  violationCategory  ViolationCategory?
+  /// Data-minimization: stored image should be purged after this time.
+  retentionExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reports ContentReport[]
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([createdAt])
+  @@index([safetyStatus])
+  @@index([retentionExpiresAt])
+}
+
+model ContentReport {
+  id                String            @id @default(cuid())
+  promptLogId       Int
+  promptLog         PromptLog         @relation(fields: [promptLogId], references: [id], onDelete: Cascade)
+  reporterId        String
+  reporter          User              @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  violationCategory ViolationCategory
+  details           String?
+  status            ReportStatus      @default(OPEN)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([promptLogId])
+  @@index([reporterId])
+  @@index([status])
+}
+
+model ModerationAction {
+  id                String               @id @default(cuid())
+  targetUserId      String
+  targetUser        User                 @relation("ModerationTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  actorId           String?
+  actor             User?                @relation("ModerationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  promptLogId       Int?
+  action            ModerationActionType
+  reason            String
+  violationCategory ViolationCategory?
+  createdAt         DateTime             @default(now())
+
+  @@index([targetUserId])
+  @@index([actorId])
+  @@index([createdAt])
 }

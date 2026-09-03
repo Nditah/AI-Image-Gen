@@ -1,129 +1,135 @@
 # AI Image Generator
 
-A full-stack **multi-provider AI image generator** built with FastAPI, Prisma/PostgreSQL, and Vite (vanilla JS). The UI sends a prompt (and optional provider) to the API, which generates an image and stores `sessionId + promptText + imageBase64 + provider` in PostgreSQL.
+<p>
+  <a href="https://github.com/Nditah/AI-Image-Gen/stargazers"><img src="https://img.shields.io/github/stars/Nditah/AI-Image-Gen?style=flat-square&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/Nditah/AI-Image-Gen/issues"><img src="https://img.shields.io/github/issues/Nditah/AI-Image-Gen?style=flat-square" alt="GitHub issues" /></a>
+  <a href="https://github.com/Nditah/AI-Image-Gen/commits/main"><img src="https://img.shields.io/github/last-commit/Nditah/AI-Image-Gen?style=flat-square" alt="GitHub last commit" /></a>
+  <a href="https://github.com/Nditah/AI-Image-Gen"><img src="https://img.shields.io/github/languages/top/Nditah/AI-Image-Gen?style=flat-square" alt="GitHub top language" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.116-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" /></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL" /></a>
+  <a href="https://www.prisma.io/"><img src="https://img.shields.io/badge/Prisma-0.15-2D3748?style=flat-square&logo=prisma&logoColor=white" alt="Prisma" /></a>
+  <a href="https://vitejs.dev/"><img src="https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite" /></a>
+  <a href="https://docs.docker.com/compose/"><img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
+  <a href="https://platform.openai.com/docs/guides/images"><img src="https://img.shields.io/badge/OpenAI-GPT%20Image-412991?style=flat-square&logo=openai&logoColor=white" alt="OpenAI" /></a>
+  <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Gemini-Image-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="Google Gemini" /></a>
+  <a href="https://platform.stability.ai/"><img src="https://img.shields.io/badge/Stability-Core-7C3AED?style=flat-square" alt="Stability AI" /></a>
+  <a href="https://huggingface.co/"><img src="https://img.shields.io/badge/HuggingFace-Inference-FFD21E?style=flat-square&logo=huggingface&logoColor=black" alt="Hugging Face" /></a>
+  <a href="https://replicate.com/"><img src="https://img.shields.io/badge/Replicate-Flux-000000?style=flat-square" alt="Replicate" /></a>
+</p>
 
-[![GitHub stars](https://img.shields.io/github/stars/Nditah/AI-Image-Gen?style=flat&logo=github)](https://github.com/Nditah/AI-Image-Gen/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/Nditah/AI-Image-Gen?style=flat)](https://github.com/Nditah/AI-Image-Gen/issues)
-[![GitHub last commit](https://img.shields.io/github/last-commit/Nditah/AI-Image-Gen?style=flat)](https://github.com/Nditah/AI-Image-Gen/commits/main)
-[![GitHub top language](https://img.shields.io/github/languages/top/Nditah/AI-Image-Gen?style=flat)](https://github.com/Nditah/AI-Image-Gen)
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Prisma](https://img.shields.io/badge/Prisma-0.15-2D3748?logo=prisma&logoColor=white)](https://www.prisma.io/)
-[![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
-[![OpenAI](https://img.shields.io/badge/OpenAI-GPT%20Image-412991?logo=openai&logoColor=white)](https://platform.openai.com/docs/guides/images)
+Turn a text prompt into an image. A Vite frontend talks to a FastAPI backend, which screens the prompt, calls the selected provider, and stores `sessionId`, prompt, base64 image, and provider in PostgreSQL via Prisma.
+
+<p align="center">
+  <a href="#run-with-docker-recommended"><strong>Quick start (Docker)</strong></a>
+  &nbsp;·&nbsp;
+  <a href="#run-locally-without-docker">Local setup</a>
+  &nbsp;·&nbsp;
+  <a href="#api">API</a>
+  &nbsp;·&nbsp;
+  <a href="http://localhost:8000/docs">OpenAPI docs</a>
+</p>
+
+---
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Supported providers](#supported-providers)
+- [Prerequisites](#prerequisites)
+- [Run with Docker](#run-with-docker-recommended)
+- [Run locally](#run-locally-without-docker)
+- [Seed accounts](#seed-accounts)
+- [API](#api)
+- [Project structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  A[Browser<br/>localhost:5173] --> B[FastAPI<br/>localhost:8000]
-  B --> C[Provider factory]
-  C --> D[OpenAI / Gemini / Stability / HuggingFace / Replicate]
+  A[Browser<br/>:5173] --> B[FastAPI<br/>:8000]
+  B --> S[Safety filter]
+  S -->|blocked| B
+  S -->|allowed| C[Provider factory]
+  C --> D[OpenAI / Gemini / Stability<br/>HuggingFace / Replicate]
   B --> E[(PostgreSQL)]
 ```
 
-1. You enter a prompt and pick a provider in the UI.
-2. The frontend `POST`s `{ "prompt": "...", "provider": "openai" }` to `/generate`.
-3. The backend loads that provider (or the `IMAGE_PROVIDER` default), generates a 1024×1024 image, and writes a `PromptLog` row with base64 image data.
-4. The UI displays the returned image as a `data:image/png;base64,...` URL.
+1. Sign in as a user (`#/login`) or admin (`#/admin/login`).
+2. Enter a prompt and pick a provider in the studio.
+3. The frontend `POST`s `{ "prompt", "provider", attestations }` to `/generate` with a bearer token.
+4. The API screens the prompt. Blocked text never reaches a provider.
+5. The selected provider returns a 1024×1024 image as base64. A `PromptLog` row is stored against the user.
+6. The UI renders the image and saves it to **My gallery**.
 
 ## Supported providers
 
-| Provider | Default model / API | Env key |
-| --- | --- | --- |
-| OpenAI | `gpt-image-1` | `OPENAI_API_KEY` |
-| Gemini | `gemini-2.0-flash-preview-image-generation` | `GEMINI_API_KEY` |
-| Stability AI | Stable Image Core | `STABILITY_API_KEY` |
-| HuggingFace | `stabilityai/stable-diffusion-xl-base-1.0` | `HUGGINGFACE_API_KEY` |
-| Replicate | `black-forest-labs/flux-schnell` (`owner/model`) | `REPLICATE_API_KEY` |
+Set `IMAGE_PROVIDER` to one of the values below. The UI can override it per request. You need an API key for **at least one** provider — never commit real keys.
 
-Set `IMAGE_PROVIDER` to `openai`, `gemini`, `stability`, `huggingface`, or `replicate`. The frontend also sends a provider per request, which overrides the backend default for that call.
-
-Never commit real API keys; keep them only in local `.env` files or secret managers.
-
-## Project structure
-
-```text
-.
-├── backend/                 FastAPI app + Prisma schema
-│   ├── app/                 API, providers, DB helpers
-│   │   └── providers/       OpenAI, Gemini, Stability, HuggingFace, Replicate
-│   ├── prisma/schema.prisma PromptLog model
-│   ├── requirements.txt
-│   └── .env.example
-├── frontend/                Vite + vanilla JS UI
-├── Dockerfile.backend
-├── Dockerfile.frontend
-└── docker-compose.yml       Postgres + API + UI
-```
+| Provider | Default model / API | Environment variable | API key |
+| :--- | :--- | :--- | :--- |
+| OpenAI | `gpt-image-1` | `OPENAI_API_KEY` | [platform.openai.com/account/api-keys](https://platform.openai.com/account/api-keys) |
+| Gemini | `gemini-2.0-flash-preview-image-generation` | `GEMINI_API_KEY` | [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) |
+| Stability AI | Stable Image Core | `STABILITY_API_KEY` | [platform.stability.ai/account/keys](https://platform.stability.ai/account/keys) |
+| HuggingFace | `stabilityai/stable-diffusion-xl-base-1.0` | `HUGGINGFACE_API_KEY` | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
+| Replicate | `black-forest-labs/flux-schnell` | `REPLICATE_API_KEY` | [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens) |
 
 ## Prerequisites
 
-You need an API key for at least one supported provider.
-
-| Path | What you need |
-| --- | --- |
-| **Docker (recommended)** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose v2) |
-| **Local (without Docker)** | Python **3.11+**, Node.js **20+**, PostgreSQL **16**, and `pip` |
+| Path | Requirements |
+| :--- | :--- |
+| **Docker** (recommended) | [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine + Compose v2 |
+| **Local** | Python **3.11+**, Node.js **20+**, PostgreSQL **16**, `pip` |
 
 ## Run with Docker (recommended)
 
-This starts PostgreSQL, the API on port **8000**, and the UI on port **5173**.
+Starts PostgreSQL, the API on port **8000**, and the UI on port **5173**.
 
-1. Clone the repo and enter it:
+```bash
+git clone https://github.com/Nditah/AI-Image-Gen.git
+cd AI-Image-Gen
+cp backend/.env.example backend/.env
+```
 
-   ```bash
-   git clone https://github.com/Nditah/AI-Image-Gen.git
-   cd AI-Image-Gen
-   ```
+Add at least one provider key in `backend/.env` and set `IMAGE_PROVIDER` to match:
 
-2. Create the backend env file (Compose reads `backend/.env`):
+```env
+IMAGE_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
 
-   ```bash
-   cp backend/.env.example backend/.env
-   ```
+Leave `DATABASE_URL` as-is. Compose overrides it so the API talks to the `db` service.
 
-3. Put at least one provider key in `backend/.env`, and set `IMAGE_PROVIDER` to match:
+```bash
+docker compose up --build
+```
 
-   ```env
-   IMAGE_PROVIDER=openai
-   OPENAI_API_KEY=sk-...
-   ```
+On first run (or after schema changes), apply the schema and seed accounts:
 
-   Leave `DATABASE_URL` as-is in this file. Compose overrides it so the API talks to the `db` service.
+```bash
+docker compose exec backend prisma db push --schema prisma/schema.prisma
+docker compose exec backend python prisma/seed.py
+```
 
-4. Build and start everything:
+| Service | URL |
+| :--- | :--- |
+| Frontend | http://localhost:5173 |
+| API | http://localhost:8000 |
+| OpenAPI docs | http://localhost:8000/docs |
+| Health | http://localhost:8000/health |
 
-   ```bash
-   docker compose up --build
-   ```
-
-5. Open the app:
-
-   | Service | URL |
-   | --- | --- |
-   | Frontend | http://localhost:5173 |
-   | API | http://localhost:8000 |
-   | Interactive docs | http://localhost:8000/docs |
-   | Health check | http://localhost:8000/health |
-
-Stop with `Ctrl+C`, or `docker compose down`. Add `-v` to also delete the Postgres volume.
+Stop with `Ctrl+C` or `docker compose down`. Add `-v` to drop the Postgres volume.
 
 ## Run locally (without Docker)
 
-Use this if you want hot reload and a local Postgres instance.
-
-### 1. Start PostgreSQL
-
-Create a database named `ai_image_gen` (user/password `postgres` match `.env.example`):
+### 1. PostgreSQL
 
 ```bash
 createdb ai_image_gen
 ```
 
-Or run only the database container from this repo:
+Or start only the database container:
 
 ```bash
 docker compose up db -d
@@ -136,18 +142,15 @@ cd backend
 cp .env.example .env
 ```
 
-Edit `.env` and set at least:
+Set at least:
 
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_image_gen"
 IMAGE_PROVIDER="openai"
 OPENAI_API_KEY="sk-..."
-OPENAI_IMAGE_MODEL="gpt-image-1"
 CORS_ORIGINS="http://localhost:5173"
 ENABLE_HTTPS_REDIRECT="false"
 ```
-
-Install Python deps, generate the Prisma client, and apply the schema:
 
 ```bash
 python3 -m venv .venv
@@ -155,11 +158,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 prisma generate --schema prisma/schema.prisma
 prisma db push --schema prisma/schema.prisma
-```
-
-Start the API (from the `backend/` directory):
-
-```bash
+python prisma/seed.py
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -169,7 +168,7 @@ From the repo root instead:
 uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Confirm it is up: http://localhost:8000/health should return `{"status":"ok"}`.
+Confirm http://localhost:8000/health returns `{"status":"ok"}`.
 
 ### 3. Frontend
 
@@ -181,44 +180,82 @@ npm install
 npm run dev
 ```
 
-The UI is at http://localhost:5173 and calls http://localhost:8000 by default.
+UI: http://localhost:5173 (calls http://localhost:8000 by default).
 
-To point the UI at a different API, create `frontend/.env`:
+Optional `frontend/.env`:
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
 ```
 
+## Seed accounts
+
+From `backend/`, `python prisma/seed.py` creates or **updates** these accounts and resets their passwords. Local/dev only.
+
+| Role | Email | Password |
+| :--- | :--- | :--- |
+| `ADMIN` | `admin@ai-image-gen.local` | `Admin123!` |
+| `USER` | `ada@ai-image-gen.local` | `User123!` |
+| `USER` | `linus@ai-image-gen.local` | `User123!` |
+| `USER` | `grace@ai-image-gen.local` | `User123!` |
+
+Override with `SEED_ADMIN_PASSWORD` and `SEED_USER_PASSWORD`.
+
 ## API
 
 | Method | Path | Description |
-| --- | --- | --- |
+| :--- | :--- | :--- |
 | `GET` | `/health` | Liveness check |
-| `POST` | `/generate` | Generate an image from a prompt |
+| `POST` | `/auth/register` | Create a user account |
+| `POST` | `/auth/login` | Sign in (returns a bearer token) |
+| `POST` | `/auth/logout` | Revoke the current session |
+| `GET` | `/auth/me` | Current user |
+| `POST` | `/generate` | Generate an image (auth required) |
+| `GET` | `/me/generations` | The signed-in user's gallery |
+| `GET` | `/admin/stats` | Admin overview counts |
+
+Interactive docs: http://localhost:8000/docs
+
+The UI uses hash routes: `#/login`, `#/admin/login`, `#/app/generate`, `#/admin`.
 
 ### `POST /generate`
+
+Requires `Authorization: Bearer <token>`. Prompts are screened **before** any provider call. Blocked prompts return `400` with `code: "PROMPT_BLOCKED"`.
 
 Optional header: `X-Session-Id` (a UUID is created if omitted).
 
 ```bash
+TOKEN=$(curl -s http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"ada@ai-image-gen.local","password":"User123!"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+
 curl -s http://localhost:8000/generate \
   -H "Content-Type: application/json" \
-  -d '{"prompt":"A cinematic view of mountains at dawn","provider":"openai"}'
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"prompt":"A cinematic view of mountains at dawn","provider":"openai","attested_ethical_use":true,"attested_no_real_person_misuse":true}'
 ```
 
-**Request**
+<details>
+<summary><strong>Request</strong></summary>
 
 ```json
 {
   "prompt": "A cinematic view of mountains at dawn",
-  "provider": "openai"
+  "provider": "openai",
+  "attested_ethical_use": true,
+  "attested_no_real_person_misuse": true
 }
 ```
 
-- `prompt` is required (3–1000 characters)
-- `provider` is optional (`openai` \| `gemini` \| `stability` \| `huggingface` \| `replicate`); defaults to `IMAGE_PROVIDER`
+- `prompt` — required, 3–1000 characters
+- `provider` — optional: `openai` · `gemini` · `stability` · `huggingface` · `replicate` (defaults to `IMAGE_PROVIDER`)
+- `attested_ethical_use` / `attested_no_real_person_misuse` — required `true`
+- Header `Authorization: Bearer <token>` — required
 
-**Success response**
+</details>
+
+<details>
+<summary><strong>Success</strong></summary>
 
 ```json
 {
@@ -227,50 +264,43 @@ curl -s http://localhost:8000/generate \
 }
 ```
 
-**Error response**
+</details>
+
+<details>
+<summary><strong>Blocked prompt</strong></summary>
 
 ```json
 {
-  "error": "HUGGINGFACE_API_KEY is not configured",
-  "provider": "huggingface"
+  "error": "This prompt was blocked by the content safety filter.",
+  "provider": "openai",
+  "code": "PROMPT_BLOCKED"
 }
 ```
 
-- 4xx: validation or configuration errors
-- 5xx: provider runtime or internal failures
+</details>
 
-Interactive OpenAPI docs: http://localhost:8000/docs
+## Project structure
 
-## Environment variables
-
-| Variable | Where | Purpose |
-| --- | --- | --- |
-| `IMAGE_PROVIDER` | `backend/.env` | Default provider (`openai`, `gemini`, `stability`, `huggingface`, `replicate`) |
-| `OPENAI_API_KEY` | `backend/.env` | OpenAI secret key |
-| `OPENAI_IMAGE_MODEL` | `backend/.env` | OpenAI image model (default `gpt-image-1`) |
-| `GEMINI_API_KEY` | `backend/.env` | Gemini secret key |
-| `GEMINI_IMAGE_MODEL` | `backend/.env` | Gemini image model |
-| `STABILITY_API_KEY` | `backend/.env` | Stability AI secret key |
-| `HUGGINGFACE_API_KEY` | `backend/.env` | HuggingFace secret key |
-| `HUGGINGFACE_IMAGE_MODEL` | `backend/.env` | HuggingFace model id |
-| `REPLICATE_API_KEY` | `backend/.env` | Replicate secret key |
-| `REPLICATE_IMAGE_MODEL` | `backend/.env` | Replicate model (`owner/model`) |
-| `IMAGE_SIZE` | `backend/.env` | Image size (default `1024x1024`) |
-| `DATABASE_URL` | `backend/.env` | PostgreSQL connection string |
-| `CORS_ORIGINS` | `backend/.env` | Comma-separated allowed origins |
-| `ENABLE_HTTPS_REDIRECT` | `backend/.env` | Set `true` only behind HTTPS |
-| `VITE_API_BASE_URL` | frontend env | API base URL (default `http://localhost:8000`) |
+```text
+.
+├── backend/                 FastAPI app, Prisma schema, seed script
+│   ├── app/                 Routes, providers, safety filter
+│   ├── prisma/              schema.prisma, migrations, seed.py
+│   └── .env.example
+├── frontend/                Vite + vanilla JS UI
+├── Dockerfile.backend
+├── Dockerfile.frontend
+└── docker-compose.yml       Postgres + API + UI
+```
 
 ## Troubleshooting
 
 | Symptom | What to check |
-| --- | --- |
-| `OPENAI_API_KEY is not configured` (or another provider key) | `backend/.env` exists and the matching key is set; restart the API after editing |
-| Database connection errors | Postgres is running; `DATABASE_URL` host is `localhost` locally and `db` in Docker |
-| CORS / failed fetch in the browser | Frontend origin is listed in `CORS_ORIGINS` (default `http://localhost:5173`) |
-| `docker compose` fails on missing env file | Copy `backend/.env.example` to `backend/.env` first |
-| Image generation returns 4xx/502 | Key, billing, and model access on the selected provider account |
-
-## License
-
-No license file is published in this repository. All rights reserved unless the owner adds one.
+| :--- | :--- |
+| `OPENAI_API_KEY is not configured` | `backend/.env` exists; matching key is set; restart the API |
+| Database connection errors | Postgres is up; host is `localhost` locally and `db` in Docker |
+| Prisma / `User` client errors | Run `prisma generate` and `prisma db push` after schema changes |
+| CORS / failed fetch | Origin listed in `CORS_ORIGINS` (default `http://localhost:5173`) |
+| Compose fails on missing env | Copy `backend/.env.example` to `backend/.env` first |
+| Generation returns 4xx / 502 | Provider key, billing, and model access |
+| `PROMPT_BLOCKED` | Safety filter rejected the prompt before a provider was called |

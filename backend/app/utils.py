@@ -35,6 +35,9 @@ class Settings(BaseModel):
     enable_https_redirect: bool = Field(
         default_factory=lambda: os.getenv("ENABLE_HTTPS_REDIRECT", "false").lower() == "true"
     )
+    auth_session_days: int = Field(
+        default_factory=lambda: int(os.getenv("AUTH_SESSION_DAYS", "7"))
+    )
 
 
 @lru_cache

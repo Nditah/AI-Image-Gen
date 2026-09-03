@@ -1,6 +1,7 @@
 import logging
 
 from prisma import Prisma
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +10,9 @@ class Database:
     """Centralized Prisma connection manager."""
 
     def __init__(self) -> None:
-        self.client = Prisma()
+        self.client = Prisma(datasource={
+            "url": os.getenv("DATABASE_URL"),
+        })
 
     async def connect(self) -> None:
         if not self.client.is_connected():
