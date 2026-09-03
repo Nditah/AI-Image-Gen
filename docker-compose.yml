@@ -18,7 +18,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: ******db:5432/ai_image_gen
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/ai_image_gen
     ports:
       - "8000:8000"
     depends_on:
