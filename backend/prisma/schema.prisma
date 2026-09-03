@@ -8,9 +8,10 @@ datasource db {
 }
 
 model PromptLog {
-  id         Int      @id @default(autoincrement())
-  sessionId  String
-  promptText String
-  imageUrl   String
-  createdAt  DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  sessionId   String
+  promptText  String
+  imageBase64 String
+  provider    String
+  createdAt   DateTime @default(now())
 }
