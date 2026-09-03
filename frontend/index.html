@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Artificial Intelligence Image Generator</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="card">
+        <h1>Artificial Intelligence Image Generator</h1>
+        <p class="subtitle">Describe your idea and generate an image in seconds.</p>
+
+        <form id="image-form" class="form">
+          <label for="prompt" class="sr-only">Prompt</label>
+          <textarea id="prompt" name="prompt" placeholder="A futuristic city at sunset with flying cars" required></textarea>
+          <button id="generate-btn" type="submit">Generate Image</button>
+        </form>
+
+        <div id="loading" class="loading hidden" aria-live="polite">
+          <span class="spinner"></span>
+          Generating your image...
+        </div>
+
+        <p id="error" class="error hidden" role="alert"></p>
+
+        <div id="image-container" class="image-container hidden">
+          <img id="generated-image" alt="Generated AI artwork" />
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
