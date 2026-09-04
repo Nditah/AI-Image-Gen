@@ -4,7 +4,15 @@ from base64 import b64encode
 
 import httpx
 
-SUPPORTED_PROVIDERS = {"openai", "gemini", "stability", "huggingface", "replicate"}
+SUPPORTED_PROVIDERS = {
+    "openai",
+    "gemini",
+    "stability",
+    "huggingface",
+    "replicate",
+    "bedrock",
+    "azure",
+}
 
 
 class ProviderError(Exception):

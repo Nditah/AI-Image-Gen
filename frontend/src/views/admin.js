@@ -1,5 +1,16 @@
 import { api, badgeClass, formatDate, imageSrc } from "../api.js";
 import { isAdmin } from "../auth.js";
+import {
+  CHART_COLORS,
+  SAFETY_COLORS,
+  VERDICT_COLORS,
+  destroyCharts,
+  loadChartJs,
+  makeBar,
+  makeDoughnut,
+  makeGroupedBar,
+  makeLine,
+} from "../charts.js";
 import { bindShell, emptyState, pager, renderShell } from "../layout.js";
 
 function escapeHtml(value) {
@@ -10,18 +21,69 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function statCard(label, value) {
-  return `<article class="stat-card"><span>${label}</span><strong>${value}</strong></article>`;
+function statCard(label, value, hint = "") {
+  return `<article class="stat-card"><span>${label}</span><strong>${value}</strong>${
+    hint ? `<em class="stat-hint">${hint}</em>` : ""
+  }</article>`;
 }
 
-export async function renderAdminOverview({ user, path }) {
+function providerLabel(name) {
+  const map = {
+    openai: "OpenAI",
+    gemini: "Gemini",
+    stability: "Stability",
+    huggingface: "HuggingFace",
+    replicate: "Replicate",
+    bedrock: "Bedrock",
+    azure: "Azure",
+  };
+  return map[String(name || "").toLowerCase()] || String(name || "Unknown");
+}
+
+function formatPct(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return `${Number(value).toFixed(1)}%`;
+}
+
+function formatMs(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  const ms = Number(value);
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+function analyticsQuery(query) {
+  const preset = query.get("range") || "30";
+  const from = query.get("from") || "";
+  const to = query.get("to") || "";
+  const params = new URLSearchParams();
+  if (from || to) {
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+  } else if (preset === "all") {
+    params.set("days", "3650");
+  } else {
+    params.set("days", preset);
+  }
+  return { preset, from, to, params };
+}
+
+export async function renderAdminOverview({ user, path, query }) {
+  const { preset, from, to, params } = analyticsQuery(query || new URLSearchParams());
   let stats = {};
+  let analytics = null;
   let error = "";
   try {
-    stats = await api("/admin/stats");
+    [stats, analytics] = await Promise.all([
+      api("/admin/stats"),
+      api(`/admin/analytics?${params.toString()}`),
+    ]);
   } catch (err) {
     error = err.message;
   }
+
+  const summary = analytics?.summary || {};
+  const rangeLabel = analytics?.range?.label || "Selected range";
 
   const content = `
     ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
@@ -33,7 +95,152 @@ export async function renderAdminOverview({ user, path }) {
       ${statCard("Last 24h", stats.generationsLast24h ?? "—")}
       ${statCard("Suspended", stats.suspended ?? "—")}
       ${statCard("Banned", stats.banned ?? "—")}
+      ${statCard("Feedback", stats.feedbackTotal ?? "—")}
+      ${statCard("Thumbs up", stats.feedbackUp ?? "—")}
+      ${statCard("Thumbs down", stats.feedbackDown ?? "—")}
     </div>
+
+    <section class="card analytics-panel">
+      <div class="analytics-header">
+        <div>
+          <h2>Usage &amp; satisfaction analytics</h2>
+          <p class="muted">Charts for academic reporting · ${escapeHtml(rangeLabel)}</p>
+        </div>
+        <form class="analytics-filters" data-form="analytics-range">
+          <div class="range-presets" role="group" aria-label="Date range">
+            ${[
+              ["7", "7 days"],
+              ["14", "14 days"],
+              ["30", "30 days"],
+              ["all", "All time"],
+            ]
+              .map(
+                ([value, label]) => `
+                <button type="button" class="range-chip ${!from && !to && preset === value ? "is-active" : ""}" data-range="${value}">${label}</button>
+              `
+              )
+              .join("")}
+          </div>
+          <label class="analytics-date">
+            <span>From</span>
+            <input type="date" name="from" value="${escapeHtml(from)}" />
+          </label>
+          <label class="analytics-date">
+            <span>To</span>
+            <input type="date" name="to" value="${escapeHtml(to)}" />
+          </label>
+          <button type="submit" class="btn-secondary">Apply</button>
+        </form>
+      </div>
+
+      <div class="stats-grid analytics-summary">
+        ${statCard("In range", summary.generations ?? 0, "generations")}
+        ${statCard("Rated", summary.rated ?? 0, "with feedback")}
+        ${statCard("Satisfaction", formatPct(summary.satisfactionRate), "thumbs up / rated")}
+        ${statCard("Unrated", summary.unrated ?? 0, "no feedback yet")}
+        ${statCard("Avg latency", formatMs(summary.avgDurationMs), "provider call")}
+        ${statCard("P95 latency", formatMs(summary.p95DurationMs), "95th percentile")}
+      </div>
+
+      <div class="chart-grid">
+        <article class="chart-card chart-card-wide">
+          <canvas id="chart-daily" aria-label="Daily generations"></canvas>
+          <p class="chart-empty muted" data-empty="daily" hidden>No generations in this range.</p>
+        </article>
+        <article class="chart-card">
+          <canvas id="chart-provider-pie" aria-label="Provider usage pie"></canvas>
+          <p class="chart-empty muted" data-empty="provider-pie" hidden>No provider usage data.</p>
+        </article>
+        <article class="chart-card">
+          <canvas id="chart-satisfaction-pie" aria-label="Satisfaction pie"></canvas>
+          <p class="chart-empty muted" data-empty="satisfaction-pie" hidden>No ratings in this range.</p>
+        </article>
+        <article class="chart-card chart-card-wide">
+          <canvas id="chart-provider-bar" aria-label="Provider usage bar"></canvas>
+          <p class="chart-empty muted" data-empty="provider-bar" hidden>No provider usage data.</p>
+        </article>
+        <article class="chart-card chart-card-wide">
+          <canvas id="chart-provider-latency" aria-label="Average latency by provider"></canvas>
+          <p class="chart-empty muted" data-empty="provider-latency" hidden>No timed generations yet. New generates store durationMs.</p>
+        </article>
+        <article class="chart-card chart-card-wide">
+          <canvas id="chart-provider-satisfaction" aria-label="Satisfaction by provider"></canvas>
+          <p class="chart-empty muted" data-empty="provider-satisfaction" hidden>No provider ratings yet.</p>
+        </article>
+        <article class="chart-card">
+          <canvas id="chart-tags" aria-label="Feedback reason tags"></canvas>
+          <p class="chart-empty muted" data-empty="tags" hidden>No feedback tags yet.</p>
+        </article>
+        <article class="chart-card">
+          <canvas id="chart-safety" aria-label="Safety status breakdown"></canvas>
+          <p class="chart-empty muted" data-empty="safety" hidden>No safety status data.</p>
+        </article>
+      </div>
+
+      <div class="table-wrap analytics-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Generations</th>
+              <th>Rated</th>
+              <th>Up</th>
+              <th>Down</th>
+              <th>Satisfaction</th>
+              <th>Avg latency</th>
+              <th>P50</th>
+              <th>P95</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(() => {
+              const sat = analytics?.satisfactionByProvider || [];
+              const latencyMap = Object.fromEntries(
+                (analytics?.latencyByProvider || []).map((row) => [row.provider, row])
+              );
+              const providers = new Set([
+                ...sat.map((row) => row.provider),
+                ...Object.keys(latencyMap),
+              ]);
+              const rows = [...providers].map((name) => {
+                const s = sat.find((row) => row.provider === name) || {
+                  provider: name,
+                  generations: 0,
+                  rated: 0,
+                  up: 0,
+                  down: 0,
+                  satisfactionRate: null,
+                };
+                const l = latencyMap[name];
+                return { ...s, latency: l };
+              });
+              rows.sort((a, b) => (b.generations || 0) - (a.generations || 0));
+              if (!rows.length) {
+                return `<tr><td colspan="9" class="muted">No rows for this range.</td></tr>`;
+              }
+              return rows
+                .map(
+                  (row) => `
+                <tr>
+                  <td><strong>${escapeHtml(providerLabel(row.provider))}</strong></td>
+                  <td>${row.generations}</td>
+                  <td>${row.rated}</td>
+                  <td><span class="badge badge-ok">${row.up}</span></td>
+                  <td><span class="badge badge-danger">${row.down}</span></td>
+                  <td>${formatPct(row.satisfactionRate)}</td>
+                  <td>${formatMs(row.latency?.avgMs)}</td>
+                  <td>${formatMs(row.latency?.p50Ms)}</td>
+                  <td>${formatMs(row.latency?.p95Ms)}</td>
+                </tr>
+              `
+                )
+                .join("");
+            })()}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card">
       <h2>Staff shortcuts</h2>
       <div class="chip-row">
@@ -50,10 +257,250 @@ export async function renderAdminOverview({ user, path }) {
       user,
       path,
       title: "Admin overview",
-      subtitle: "Accounts, generation volume, and moderation load.",
+      subtitle: "Accounts, generation volume, provider usage, and satisfaction.",
       content,
     }),
-    bind: bindShell,
+    bind(root) {
+      bindShell(root);
+      const form = root.querySelector("[data-form='analytics-range']");
+      form?.querySelectorAll("[data-range]").forEach((button) => {
+        button.addEventListener("click", () => {
+          window.location.hash = `#/admin?range=${button.dataset.range}`;
+        });
+      });
+      form?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const fd = new FormData(form);
+        const nextFrom = String(fd.get("from") || "").trim();
+        const nextTo = String(fd.get("to") || "").trim();
+        const q = new URLSearchParams();
+        if (nextFrom) q.set("from", nextFrom);
+        if (nextTo) q.set("to", nextTo);
+        if (!nextFrom && !nextTo) q.set("range", "30");
+        window.location.hash = `#/admin?${q.toString()}`;
+      });
+
+      if (!analytics) return;
+      const charts = [];
+      loadChartJs()
+        .then((Chart) => {
+          const usage = analytics.providerUsage || [];
+          const satisfaction = analytics.satisfactionByProvider || [];
+          const latency = analytics.latencyByProvider || [];
+          const tags = analytics.feedbackTags || [];
+          const daily = analytics.dailyGenerations || [];
+          const safety = analytics.safetyBreakdown || [];
+          const pie = analytics.satisfactionPie || [];
+
+          const setEmpty = (canvasId, emptyKey, empty) => {
+            const canvas = root.querySelector(`#${canvasId}`);
+            const el = root.querySelector(`[data-empty="${emptyKey}"]`);
+            if (el) el.hidden = !empty;
+            if (canvas) canvas.hidden = empty;
+          };
+
+          // Daily line
+          const dailyCanvas = root.querySelector("#chart-daily");
+          if (dailyCanvas) {
+            const hasDaily = daily.some((d) => d.count > 0);
+            setEmpty("chart-daily", "daily", !hasDaily);
+            if (hasDaily) {
+              charts.push(
+                makeLine(
+                  Chart,
+                  dailyCanvas,
+                  daily.map((d) => d.date.slice(5)),
+                  daily.map((d) => d.count),
+                  "Daily generation volume"
+                )
+              );
+            }
+          }
+
+          // Provider pie
+          const providerPie = root.querySelector("#chart-provider-pie");
+          if (providerPie) {
+            const empty = !usage.length;
+            setEmpty("chart-provider-pie", "provider-pie", empty);
+            if (!empty) {
+              charts.push(
+                makeDoughnut(
+                  Chart,
+                  providerPie,
+                  usage.map((u) => providerLabel(u.provider)),
+                  usage.map((u) => u.count),
+                  usage.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
+                  "Provider usage share"
+                )
+              );
+            }
+          }
+
+          // Satisfaction pie
+          const satPie = root.querySelector("#chart-satisfaction-pie");
+          if (satPie) {
+            const total = pie.reduce((sum, item) => sum + (item.count || 0), 0);
+            setEmpty("chart-satisfaction-pie", "satisfaction-pie", total === 0);
+            if (total > 0) {
+              charts.push(
+                makeDoughnut(
+                  Chart,
+                  satPie,
+                  pie.map((item) => item.label),
+                  pie.map((item) => item.count),
+                  pie.map((item) => VERDICT_COLORS[item.key] || CHART_COLORS[0]),
+                  "Overall thumbs up vs down"
+                )
+              );
+            }
+          }
+
+          // Provider bar
+          const providerBar = root.querySelector("#chart-provider-bar");
+          if (providerBar) {
+            const empty = !usage.length;
+            setEmpty("chart-provider-bar", "provider-bar", empty);
+            if (!empty) {
+              charts.push(
+                makeBar(
+                  Chart,
+                  providerBar,
+                  usage.map((u) => providerLabel(u.provider)),
+                  usage.map((u) => u.count),
+                  usage.map((_, i) => CHART_COLORS[i % CHART_COLORS.length]),
+                  "Generations by provider"
+                )
+              );
+            }
+          }
+
+          // Latency by provider
+          const latencyBar = root.querySelector("#chart-provider-latency");
+          if (latencyBar) {
+            const empty = !latency.length;
+            setEmpty("chart-provider-latency", "provider-latency", empty);
+            if (!empty) {
+              charts.push(
+                makeGroupedBar(
+                  Chart,
+                  latencyBar,
+                  latency.map((row) => providerLabel(row.provider)),
+                  [
+                    {
+                      label: "Avg ms",
+                      data: latency.map((row) => row.avgMs),
+                      backgroundColor: "#0ea5e9",
+                      borderRadius: 6,
+                      maxBarThickness: 28,
+                    },
+                    {
+                      label: "P50 ms",
+                      data: latency.map((row) => row.p50Ms),
+                      backgroundColor: "#14b8a6",
+                      borderRadius: 6,
+                      maxBarThickness: 28,
+                    },
+                    {
+                      label: "P95 ms",
+                      data: latency.map((row) => row.p95Ms),
+                      backgroundColor: "#f59e0b",
+                      borderRadius: 6,
+                      maxBarThickness: 28,
+                    },
+                  ],
+                  "Provider latency (ms)"
+                )
+              );
+            }
+          }
+
+          // Satisfaction by provider grouped bar
+          const satBar = root.querySelector("#chart-provider-satisfaction");
+          if (satBar) {
+            const ratedRows = satisfaction.filter((row) => row.rated > 0);
+            setEmpty("chart-provider-satisfaction", "provider-satisfaction", !ratedRows.length);
+            if (ratedRows.length) {
+              charts.push(
+                makeGroupedBar(
+                  Chart,
+                  satBar,
+                  ratedRows.map((row) => providerLabel(row.provider)),
+                  [
+                    {
+                      label: "Thumbs up",
+                      data: ratedRows.map((row) => row.up),
+                      backgroundColor: VERDICT_COLORS.UP,
+                      borderRadius: 6,
+                      maxBarThickness: 28,
+                    },
+                    {
+                      label: "Thumbs down",
+                      data: ratedRows.map((row) => row.down),
+                      backgroundColor: VERDICT_COLORS.DOWN,
+                      borderRadius: 6,
+                      maxBarThickness: 28,
+                    },
+                  ],
+                  "Satisfaction by provider"
+                )
+              );
+            }
+          }
+
+          // Tags horizontal bar
+          const tagsCanvas = root.querySelector("#chart-tags");
+          if (tagsCanvas) {
+            setEmpty("chart-tags", "tags", !tags.length);
+            if (tags.length) {
+              charts.push(
+                makeBar(
+                  Chart,
+                  tagsCanvas,
+                  tags.map((t) => t.label),
+                  tags.map((t) => t.count),
+                  tags.map((_, i) => CHART_COLORS[(i + 2) % CHART_COLORS.length]),
+                  "Feedback reason tags",
+                  { horizontal: true }
+                )
+              );
+            }
+          }
+
+          // Safety doughnut
+          const safetyCanvas = root.querySelector("#chart-safety");
+          if (safetyCanvas) {
+            setEmpty("chart-safety", "safety", !safety.length);
+            if (safety.length) {
+              charts.push(
+                makeDoughnut(
+                  Chart,
+                  safetyCanvas,
+                  safety.map((s) => s.status),
+                  safety.map((s) => s.count),
+                  safety.map((s) => SAFETY_COLORS[s.status] || CHART_COLORS[8]),
+                  "Safety status mix"
+                )
+              );
+            }
+          }
+        })
+        .catch((err) => {
+          const panel = root.querySelector(".analytics-panel");
+          if (panel) {
+            const note = document.createElement("p");
+            note.className = "error";
+            note.textContent = err.message || "Charts could not be loaded.";
+            panel.appendChild(note);
+          }
+        });
+
+      // Clean up when navigating away (hashchange will re-render).
+      const onLeave = () => {
+        destroyCharts(charts);
+        window.removeEventListener("hashchange", onLeave);
+      };
+      window.addEventListener("hashchange", onLeave, { once: true });
+    },
   };
 }
 
@@ -181,14 +628,19 @@ export async function renderAdminGenerations({ user, path, query }) {
   }
 
   const rows = (data.items || [])
-    .map(
-      (item) => `
+    .map((item) => {
+      const fb = item.feedback;
+      const feedbackLabel = fb
+        ? `${fb.verdict === "UP" ? "Up" : "Down"}${fb.tags?.length ? ` · ${fb.tags.join(", ")}` : ""}`
+        : "—";
+      return `
         <tr>
           <td>
             <div class="clip">${escapeHtml(item.promptText)}</div>
             <div class="muted">${escapeHtml(item.user?.email || "Anonymous")} · ${escapeHtml(item.provider)}</div>
           </td>
           <td><span class="${badgeClass(item.safetyStatus)}">${escapeHtml(item.safetyStatus)}</span></td>
+          <td><span class="${fb ? badgeClass(fb.verdict === "UP" ? "allowed" : "flagged") : "muted"}">${escapeHtml(feedbackLabel)}</span></td>
           <td>${formatDate(item.createdAt)}</td>
           <td>
             <div class="table-actions">
@@ -201,8 +653,8 @@ export async function renderAdminGenerations({ user, path, query }) {
             </div>
           </td>
         </tr>
-      `
-    )
+      `;
+    })
     .join("");
 
   const content = `
@@ -220,7 +672,7 @@ export async function renderAdminGenerations({ user, path, query }) {
     ${
       data.items?.length
         ? `<div class="table-wrap"><table>
-            <thead><tr><th>Prompt</th><th>Safety</th><th>Created</th><th></th></tr></thead>
+            <thead><tr><th>Prompt</th><th>Safety</th><th>Feedback</th><th>Created</th><th></th></tr></thead>
             <tbody>${rows}</tbody>
           </table></div>
           ${pager(

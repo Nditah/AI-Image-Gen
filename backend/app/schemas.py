@@ -2,7 +2,15 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-ProviderName = Literal["openai", "gemini", "stability", "huggingface", "replicate"]
+ProviderName = Literal[
+    "openai",
+    "gemini",
+    "stability",
+    "huggingface",
+    "replicate",
+    "bedrock",
+    "azure",
+]
 AccountStatusName = Literal["PENDING_VERIFICATION", "ACTIVE", "SUSPENDED", "BANNED"]
 UserRoleName = Literal["USER", "MODERATOR", "ADMIN"]
 ReportStatusName = Literal["OPEN", "UNDER_REVIEW", "ACTIONED", "DISMISSED"]
@@ -33,6 +41,8 @@ class GenerateImageResponse(BaseModel):
     image_base64: str
     provider: str
     generation_id: int | None = None
+    duration_ms: int | None = None
+    model: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -113,3 +123,53 @@ class AdminReportUpdateRequest(BaseModel):
 
 class AcceptConsentRequest(BaseModel):
     policy_document_id: str
+
+
+FeedbackVerdictName = Literal["UP", "DOWN"]
+FeedbackTagName = Literal[
+    "accurate",
+    "creative",
+    "not_what_i_asked",
+    "low_quality",
+    "felt_unsafe",
+    "overblocked",
+    "slow",
+    "provider_issue",
+]
+
+FEEDBACK_TAGS: tuple[str, ...] = (
+    "accurate",
+    "creative",
+    "not_what_i_asked",
+    "low_quality",
+    "felt_unsafe",
+    "overblocked",
+    "slow",
+    "provider_issue",
+)
+
+
+class UpsertGenerationFeedbackRequest(BaseModel):
+    verdict: FeedbackVerdictName
+    tags: list[FeedbackTagName] = Field(default_factory=list, max_length=8)
+    remark: str | None = Field(default=None, max_length=500)
+
+    @field_validator("tags")
+    @classmethod
+    def unique_tags(cls, value: list[str]) -> list[str]:
+        # Preserve order while dropping duplicates.
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for tag in value:
+            if tag not in seen:
+                seen.add(tag)
+                ordered.append(tag)
+        return ordered
+
+    @field_validator("remark")
+    @classmethod
+    def clean_remark(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.split())
+        return cleaned or None

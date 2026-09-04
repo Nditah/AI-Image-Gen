@@ -17,6 +17,9 @@ async def create_prompt_log(
     safety_status: str = "ALLOWED",
     blocked_reason: str | None = None,
     violation_category: str | None = None,
+    duration_ms: int | None = None,
+    model_name: str | None = None,
+    image_size: str | None = None,
 ) -> PromptLog:
     return await database.client.promptlog.create(
         data={
@@ -31,5 +34,8 @@ async def create_prompt_log(
             "safetyStatus": safety_status,
             "blockedReason": blocked_reason,
             "violationCategory": violation_category,
+            "durationMs": duration_ms,
+            "modelName": model_name,
+            "imageSize": image_size,
         }
     )

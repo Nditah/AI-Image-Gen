@@ -14,7 +14,7 @@ async def generate_image(prompt: str) -> dict:
         raise ProviderConfigError("STABILITY_API_KEY is not configured", PROVIDER_NAME)
 
     headers = {
-        "Authorization": f"******",
+        "Authorization": f"Bearer {settings.stability_api_key}",
         "Accept": "image/*",
     }
     payload = {

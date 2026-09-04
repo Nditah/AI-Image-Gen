@@ -2,6 +2,26 @@ import { clearSession, getToken, setSession } from "./auth.js";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
+export const REQUIRED_POLICY_KINDS = [
+  "AGE_GATE",
+  "ACCEPTABLE_USE",
+  "PRIVACY",
+  "TERMS_OF_SERVICE",
+];
+
+/** True when the user has accepted the latest required policies. */
+export function isConsentComplete(status) {
+  if (!status || typeof status !== "object") return false;
+  if (status.complete === true) return true;
+  if (Array.isArray(status.missing) && Array.isArray(status.required)) {
+    return status.required.length >= REQUIRED_POLICY_KINDS.length && status.missing.length === 0;
+  }
+  const acceptedKinds = new Set(
+    (status.items || []).map((item) => item.policy?.kind).filter(Boolean)
+  );
+  return REQUIRED_POLICY_KINDS.every((kind) => acceptedKinds.has(kind));
+}
+
 export class ApiError extends Error {
   constructor(message, { status, code, payload } = {}) {
     super(message);

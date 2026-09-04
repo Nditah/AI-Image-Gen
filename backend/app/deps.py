@@ -5,7 +5,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from prisma.models import User
 
 from .auth import account_can_generate, find_session_user
+from .consent import (
+    CONSENT_REQUIRED_CODE,
+    CONSENT_REQUIRED_MESSAGE,
+    latest_required_policies,
+    missing_required_policies,
+)
 from .security import enum_value
+from .serializers import serialize_policy
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -50,6 +57,28 @@ async def require_active_user(user: User = Depends(get_current_user)) -> User:
     reason = account_can_generate(user)
     if reason:
         raise_api_error(403, reason, "ACCOUNT_RESTRICTED")
+    return user
+
+
+async def require_consenting_user(user: User = Depends(require_active_user)) -> User:
+    """Active adult users must have accepted the latest required policy versions."""
+    required = await latest_required_policies()
+    if len(required) < 4:
+        raise_api_error(
+            503,
+            "Required policy documents are not configured. Run the seed script.",
+            "POLICIES_NOT_CONFIGURED",
+        )
+    missing = await missing_required_policies(user.id)
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": CONSENT_REQUIRED_MESSAGE,
+                "code": CONSENT_REQUIRED_CODE,
+                "missing": [serialize_policy(item) for item in missing],
+            },
+        )
     return user
 
 

@@ -6,3 +6,4 @@ openai==1.102.0
 prisma==0.15.0
 httpx==0.28.1
 bcrypt==4.2.1
+boto3==1.40.18

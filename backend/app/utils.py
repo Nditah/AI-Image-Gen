@@ -31,6 +31,23 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("REPLICATE_IMAGE_MODEL", "black-forest-labs/flux-schnell")
     )
 
+    aws_region: str = Field(default_factory=lambda: os.getenv("AWS_REGION", "us-east-1"))
+    aws_access_key_id: str = Field(default_factory=lambda: os.getenv("AWS_ACCESS_KEY_ID", ""))
+    aws_secret_access_key: str = Field(default_factory=lambda: os.getenv("AWS_SECRET_ACCESS_KEY", ""))
+    aws_session_token: str = Field(default_factory=lambda: os.getenv("AWS_SESSION_TOKEN", ""))
+    bedrock_image_model: str = Field(
+        default_factory=lambda: os.getenv("BEDROCK_IMAGE_MODEL", "amazon.titan-image-generator-v2:0")
+    )
+
+    azure_openai_api_key: str = Field(default_factory=lambda: os.getenv("AZURE_OPENAI_API_KEY", ""))
+    azure_openai_endpoint: str = Field(default_factory=lambda: os.getenv("AZURE_OPENAI_ENDPOINT", ""))
+    azure_openai_api_version: str = Field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview")
+    )
+    azure_openai_deployment: str = Field(
+        default_factory=lambda: os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-image-1")
+    )
+
     cors_origins: str = Field(default_factory=lambda: os.getenv("CORS_ORIGINS", "http://localhost:5173"))
     enable_https_redirect: bool = Field(
         default_factory=lambda: os.getenv("ENABLE_HTTPS_REDIRECT", "false").lower() == "true"
@@ -43,3 +60,20 @@ class Settings(BaseModel):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def resolve_model_name(provider: str, settings: Settings | None = None) -> str | None:
+    """Best-effort model / deployment id for analytics (image APIs have no temperature)."""
+    cfg = settings or get_settings()
+    key = (provider or cfg.image_provider or "").lower()
+    mapping = {
+        "openai": cfg.openai_image_model,
+        "gemini": cfg.gemini_image_model,
+        "huggingface": cfg.huggingface_image_model,
+        "replicate": cfg.replicate_image_model,
+        "bedrock": cfg.bedrock_image_model,
+        "azure": cfg.azure_openai_deployment,
+        "stability": "stable-image-core",
+    }
+    value = mapping.get(key)
+    return value or None

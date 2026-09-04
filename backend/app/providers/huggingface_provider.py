@@ -14,7 +14,7 @@ async def generate_image(prompt: str) -> dict:
         raise ProviderConfigError("HUGGINGFACE_API_KEY is not configured", PROVIDER_NAME)
 
     headers = {
-        "Authorization": f"******",
+        "Authorization": f"Bearer {settings.huggingface_api_key}",
     }
 
     try:

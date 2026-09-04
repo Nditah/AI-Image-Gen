@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Query
 from prisma.models import User
 
+from .analytics import build_admin_analytics
 from .auth import serialize_user
 from .database import database
 from .deps import require_admin, require_staff, raise_api_error
@@ -26,6 +27,9 @@ async def admin_stats(_staff: User = Depends(require_staff)) -> dict:
     recent_generations = await database.client.promptlog.count(where={"createdAt": {"gte": day_ago}})
     suspended = await database.client.user.count(where={"status": "SUSPENDED"})
     banned = await database.client.user.count(where={"status": "BANNED"})
+    feedback_total = await database.client.generationfeedback.count()
+    feedback_up = await database.client.generationfeedback.count(where={"verdict": "UP"})
+    feedback_down = await database.client.generationfeedback.count(where={"verdict": "DOWN"})
     return {
         "users": users,
         "generations": generations,
@@ -34,7 +38,21 @@ async def admin_stats(_staff: User = Depends(require_staff)) -> dict:
         "generationsLast24h": recent_generations,
         "suspended": suspended,
         "banned": banned,
+        "feedbackTotal": feedback_total,
+        "feedbackUp": feedback_up,
+        "feedbackDown": feedback_down,
     }
+
+
+@router.get("/analytics")
+async def admin_analytics(
+    _staff: User = Depends(require_staff),
+    days: int | None = Query(default=30, ge=1, le=3650),
+    date_from: str | None = Query(default=None, alias="from"),
+    date_to: str | None = Query(default=None, alias="to"),
+) -> dict:
+    """Provider usage and satisfaction aggregates for charts (date-ranged)."""
+    return await build_admin_analytics(days=days, date_from=date_from, date_to=date_to)
 
 
 @router.get("/users")
@@ -137,7 +155,7 @@ async def list_generations(
         skip=skip,
         take=limit,
         order={"createdAt": "desc"},
-        include={"user": True},
+        include={"user": True, "feedback": True},
     )
     return {
         "items": [serialize_prompt_log(item, include_image=False) for item in items],
@@ -151,7 +169,7 @@ async def list_generations(
 async def get_generation(generation_id: int, _staff: User = Depends(require_staff)) -> dict:
     item = await database.client.promptlog.find_unique(
         where={"id": generation_id},
-        include={"user": True},
+        include={"user": True, "feedback": True},
     )
     if item is None:
         raise_api_error(404, "Generation not found.", "NOT_FOUND")
