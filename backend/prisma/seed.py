@@ -49,8 +49,8 @@ SEED_USERS = (
         "password": USER_PASSWORD,
     },
     {
-        "email": "grace@ai-image-gen.local",
-        "displayName": "Grace Hopper",
+        "email": "nicholas@ai-image-gen.local",
+        "displayName": "Nicholas Chibueze",
         "role": "USER",
         "password": USER_PASSWORD,
     },

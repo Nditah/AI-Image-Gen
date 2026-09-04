@@ -6,22 +6,23 @@ from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 from prisma.models import User
 
-from .deps import require_active_user
+from .deps import require_consenting_user
 from .models import create_prompt_log
 from .providers.provider_factory import ProviderConfigError, ProviderRuntimeError, get_provider_module
 from .safety import BLOCKED_PROMPT_MESSAGE, PromptBlockedError, ensure_prompt_allowed
 from .schemas import GenerateImageRequest, GenerateImageResponse
-from .utils import get_settings
+from .utils import get_settings, resolve_model_name
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
 def _safe_error_message(message: str, fallback: str) -> str:
-    lowered = message.lower()
-    if "traceback" in lowered or "\n" in message:
+    cleaned = " ".join((message or "").split())
+    lowered = cleaned.lower()
+    if "traceback" in lowered:
         return fallback
-    return message[:300] if message else fallback
+    return cleaned[:300] if cleaned else fallback
 
 
 async def _persist_blocked_prompt(
@@ -49,7 +50,7 @@ async def _persist_blocked_prompt(
 @router.post("/generate", response_model=GenerateImageResponse)
 async def generate_image(
     payload: GenerateImageRequest,
-    user: User = Depends(require_active_user),
+    user: User = Depends(require_consenting_user),
     x_session_id: str | None = Header(default=None),
 ):
     session_id = x_session_id or str(uuid4())
@@ -91,12 +92,17 @@ async def generate_image(
 
     try:
         provider_module = get_provider_module(requested_provider)
+        started = datetime.now(timezone.utc)
         result = await provider_module.generate_image(payload.prompt)
+        duration_ms = max(int((datetime.now(timezone.utc) - started).total_seconds() * 1000), 0)
 
         image_base64 = result.get("image_base64")
         provider = result.get("provider") or requested_provider
         if not image_base64:
             raise ProviderRuntimeError("Provider returned no image data", provider)
+
+        model_name = result.get("model") or resolve_model_name(provider, settings)
+        image_size = result.get("image_size") or settings.image_size
 
         retention = datetime.now(timezone.utc) + timedelta(days=30)
         log = await create_prompt_log(
@@ -109,6 +115,9 @@ async def generate_image(
             attested_no_real_person_misuse=True,
             retention_expires_at=retention,
             safety_status="ALLOWED",
+            duration_ms=duration_ms,
+            model_name=model_name,
+            image_size=image_size,
         )
 
         logger.info(
@@ -117,11 +126,19 @@ async def generate_image(
                 "session_id": session_id,
                 "user_id": user.id,
                 "provider": provider,
+                "model": model_name,
+                "duration_ms": duration_ms,
                 "prompt": payload.prompt,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
-        return GenerateImageResponse(image_base64=image_base64, provider=provider, generation_id=log.id)
+        return GenerateImageResponse(
+            image_base64=image_base64,
+            provider=provider,
+            generation_id=log.id,
+            duration_ms=duration_ms,
+            model=model_name,
+        )
     except ProviderConfigError as exc:
         logger.warning("Provider configuration error: %s", exc)
         return JSONResponse(
@@ -129,10 +146,17 @@ async def generate_image(
             content={"error": _safe_error_message(str(exc), "Provider configuration error"), "provider": exc.provider},
         )
     except ProviderRuntimeError as exc:
-        logger.exception("Provider runtime error")
+        if exc.status_code == 429:
+            logger.warning("Provider rate/quota limit: %s", exc)
+        else:
+            logger.exception("Provider runtime error")
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": _safe_error_message(str(exc), "Provider request failed"), "provider": exc.provider},
+            content={
+                "error": _safe_error_message(str(exc), "Provider request failed"),
+                "provider": exc.provider,
+                "code": "PROVIDER_QUOTA" if exc.status_code == 429 else "PROVIDER_ERROR",
+            },
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled image generation error")

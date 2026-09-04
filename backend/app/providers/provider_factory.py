@@ -4,7 +4,11 @@ from base64 import b64encode
 
 import httpx
 
-SUPPORTED_PROVIDERS = {"openai", "gemini", "stability", "huggingface", "replicate"}
+SUPPORTED_PROVIDERS = {
+    "openai",
+    "stability",
+    "huggingface",
+}
 
 
 class ProviderError(Exception):
@@ -20,8 +24,8 @@ class ProviderConfigError(ProviderError):
 
 
 class ProviderRuntimeError(ProviderError):
-    def __init__(self, message: str, provider: str) -> None:
-        super().__init__(message, provider, status_code=502)
+    def __init__(self, message: str, provider: str, status_code: int = 502) -> None:
+        super().__init__(message, provider, status_code=status_code)
 
 
 def normalize_provider_name(provider: str) -> str:

@@ -1,5 +1,7 @@
-import { api, badgeClass, formatDate, imageSrc } from "../api.js";
+import { api, badgeClass, formatDate, imageSrc, isConsentComplete } from "../api.js";
+import { bindFeedbackPanels, feedbackPanelHtml } from "../feedback.js";
 import { bindShell, emptyState, pager, renderShell } from "../layout.js";
+import { bindGalleryLightbox, galleryLightboxHtml } from "../lightbox.js";
 
 function escapeHtml(value) {
   return String(value || "")
@@ -9,34 +11,86 @@ function escapeHtml(value) {
 }
 
 export async function renderGenerate({ user, path }) {
+  let consentReady = false;
+  let missingCount = 0;
+  try {
+    const consents = await api("/me/consents");
+    consentReady = isConsentComplete(consents);
+    if (Array.isArray(consents.missing)) {
+      missingCount = consents.missing.length;
+    } else if (!consentReady) {
+      const acceptedKinds = new Set(
+        (consents.items || []).map((item) => item.policy?.kind).filter(Boolean)
+      );
+      missingCount = ["AGE_GATE", "ACCEPTABLE_USE", "PRIVACY", "TERMS_OF_SERVICE"].filter(
+        (kind) => !acceptedKinds.has(kind)
+      ).length;
+    }
+  } catch {
+    consentReady = false;
+  }
+
+  const gateNotice = consentReady
+    ? ""
+    : `
+      <aside class="consent-gate" role="status">
+        <div class="consent-gate-body">
+          <h2>Policies required before generating</h2>
+          <p>
+            Read and accept ${missingCount > 0 ? `the ${missingCount} remaining` : "all required"}
+            policies on Guidelines. Generation stays disabled here until that is done — the API will also reject requests without those consents.
+          </p>
+        </div>
+        <div class="consent-gate-actions">
+          <a class="btn-secondary" href="#/app/guidelines?required=1">Go to Guidelines</a>
+        </div>
+      </aside>
+    `;
+
   const content = `
-    <section class="card">
-      <form class="form" data-form="generate">
-        <label class="label" for="provider">Provider</label>
-        <select id="provider" name="provider">
-          <option value="openai">OpenAI</option>
-          <option value="gemini">Gemini</option>
-          <option value="stability">Stability AI</option>
-          <option value="huggingface">HuggingFace</option>
-          <option value="replicate">Replicate</option>
-        </select>
-        <label class="label" for="prompt">Prompt</label>
-        <textarea id="prompt" name="prompt" placeholder="A futuristic city at sunset with flying cars" required minlength="3"></textarea>
-        <label class="check">
-          <input type="checkbox" name="attested_ethical_use" required />
-          This prompt complies with the acceptable-use policy.
-        </label>
-        <label class="check">
-          <input type="checkbox" name="attested_no_real_person_misuse" required />
-          This is not a non-consensual depiction of a real person.
-        </label>
-        <button type="submit">Generate image</button>
+    <section class="card generate-studio ${consentReady ? "" : "is-consent-locked"}">
+      ${gateNotice}
+      <form class="form generate-form" data-form="generate">
+        <fieldset ${consentReady ? "" : "disabled"}>
+          <div class="field-block">
+            <label class="label" for="provider">Provider</label>
+            <p class="field-hint">Choose which model service will create the image.</p>
+            <select id="provider" name="provider">
+              <option value="openai">OpenAI</option>
+              <option value="stability">Stability AI</option>
+              <option value="huggingface">HuggingFace</option>
+            </select>
+          </div>
+
+          <div class="field-block">
+            <label class="label" for="prompt">Prompt</label>
+            <p class="field-hint">Be specific about subject, lighting, style, and mood.</p>
+            <textarea id="prompt" name="prompt" placeholder="A cinematic view of mountains at dawn, soft golden light, wide angle" required minlength="3"></textarea>
+          </div>
+
+          <div class="attest-block">
+            <p class="label">Before you generate</p>
+            <label class="check">
+              <input type="checkbox" name="attested_ethical_use" required />
+              <span>This prompt complies with the acceptable-use policy.</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" name="attested_no_real_person_misuse" required />
+              <span>This is not a non-consensual depiction of a real person.</span>
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn-generate">Generate image</button>
+          </div>
+        </fieldset>
       </form>
       <div id="loading" class="loading hidden"><span class="spinner"></span> Generating your image...</div>
       <p id="error" class="error hidden" role="alert"></p>
       <div id="image-container" class="image-container hidden">
         <img id="generated-image" alt="Generated AI artwork" />
         <p id="provider-used" class="provider-used"></p>
+        <div id="feedback-slot"></div>
       </div>
     </section>
   `;
@@ -46,23 +100,29 @@ export async function renderGenerate({ user, path }) {
       user,
       path,
       title: "Generate",
-      subtitle: "Describe a scene. Prompts are screened before any provider is called.",
+      subtitle: consentReady
+        ? "Describe a scene. Prompts are screened before any provider is called."
+        : "Accept required policies on Guidelines before you can generate.",
       content,
     }),
     bind(root) {
       bindShell(root);
       const form = root.querySelector("[data-form='generate']");
+      if (!consentReady || !form) return;
+
       const loadingEl = root.querySelector("#loading");
       const errorEl = root.querySelector("#error");
       const imageContainer = root.querySelector("#image-container");
       const generatedImage = root.querySelector("#generated-image");
       const providerUsedEl = root.querySelector("#provider-used");
-      const button = form.querySelector("button");
+      const feedbackSlot = root.querySelector("#feedback-slot");
+      const button = form.querySelector("button[type='submit']");
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         errorEl.classList.add("hidden");
         imageContainer.classList.add("hidden");
+        if (feedbackSlot) feedbackSlot.innerHTML = "";
         button.disabled = true;
         loadingEl.classList.remove("hidden");
         try {
@@ -76,9 +136,23 @@ export async function renderGenerate({ user, path }) {
             },
           });
           generatedImage.src = imageSrc(data.image_base64);
-          providerUsedEl.textContent = `Provider used: ${data.provider}`;
+          providerUsedEl.textContent = [
+            `Provider used: ${data.provider}`,
+            data.model ? `Model: ${data.model}` : null,
+            data.duration_ms != null ? `Latency: ${(data.duration_ms / 1000).toFixed(1)}s` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
           imageContainer.classList.remove("hidden");
+          if (feedbackSlot && data.generation_id) {
+            feedbackSlot.innerHTML = feedbackPanelHtml(data.generation_id);
+            bindFeedbackPanels(feedbackSlot, api);
+          }
         } catch (error) {
+          if (error.code === "CONSENT_REQUIRED") {
+            window.dispatchEvent(new HashChangeEvent("hashchange"));
+            return;
+          }
           errorEl.textContent = error.message;
           errorEl.classList.remove("hidden");
         } finally {
@@ -100,18 +174,39 @@ export async function renderGallery({ user, path, query }) {
     error = err.message;
   }
 
-  const cards = (data.items || [])
+  const items = data.items || [];
+  const slides = [];
+
+  const cards = items
     .map((item) => {
       const src = item.hasImage ? imageSrc(item.image_base64) : "";
+      let thumb = `<div class="gallery-missing">No image stored</div>`;
+      if (src) {
+        const slideIndex = slides.length;
+        slides.push({
+          src,
+          prompt: item.promptText || "",
+          meta: `${item.provider || "—"} · ${formatDate(item.createdAt)}`,
+        });
+        thumb = `
+          <button type="button" class="gallery-thumb" data-lightbox-open="${slideIndex}" aria-label="View full image">
+            <img src="${src}" alt="${escapeHtml(item.promptText || "Generated image")}" loading="lazy" />
+            <span class="gallery-thumb-overlay" aria-hidden="true">
+              <span class="gallery-thumb-hint">View</span>
+            </span>
+          </button>
+        `;
+      }
       return `
         <article class="gallery-card">
-          ${src ? `<img src="${src}" alt="" />` : `<div class="gallery-missing">No image stored</div>`}
+          ${thumb}
           <div class="gallery-meta">
             <p>${escapeHtml(item.promptText)}</p>
             <div class="row-gap">
               <span class="${badgeClass(item.safetyStatus)}">${escapeHtml(item.safetyStatus)}</span>
               <span class="muted">${escapeHtml(item.provider)} · ${formatDate(item.createdAt)}</span>
             </div>
+            ${feedbackPanelHtml(item.id, item.feedback, { compact: true })}
           </div>
         </article>
       `;
@@ -121,8 +216,8 @@ export async function renderGallery({ user, path, query }) {
   const content = `
     ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
     ${
-      data.items?.length
-        ? `<div class="gallery-grid">${cards}</div>${pager(data.page, data.total, data.limit, "#/app/gallery?page=")}`
+      items.length
+        ? `<div class="gallery-grid">${cards}</div>${pager(data.page, data.total, data.limit, "#/app/gallery?page=")}${galleryLightboxHtml()}`
         : emptyState("No generations yet", "Your images will appear here after you create one.")
     }
   `;
@@ -135,51 +230,75 @@ export async function renderGallery({ user, path, query }) {
       subtitle: `${data.total || 0} saved generation${data.total === 1 ? "" : "s"}`,
       content,
     }),
-    bind: bindShell,
+    bind(root) {
+      bindShell(root);
+      bindFeedbackPanels(root, api);
+      bindGalleryLightbox(root, slides);
+    },
   };
 }
 
-export async function renderGuidelines({ user, path }) {
-  let policies = [];
+export async function renderGuidelines({ user, path, query }) {
+  const requiredGate = query?.get("required") === "1";
+  let consentStatus = {
+    complete: false,
+    required: [],
+    missing: [],
+    items: [],
+  };
   try {
-    const data = await api("/policies");
-    policies = data.items || [];
+    consentStatus = await api("/me/consents");
   } catch {
-    policies = [];
+    // keep defaults
   }
 
-  let consents = [];
-  try {
-    const data = await api("/me/consents");
-    consents = data.items || [];
-  } catch {
-    consents = [];
-  }
+  const policies = consentStatus.required?.length
+    ? consentStatus.required
+    : (await api("/policies").catch(() => ({ items: [] }))).items || [];
+  const missingIds = new Set((consentStatus.missing || []).map((item) => item.id));
+  const acceptedIds = new Set(
+    (consentStatus.items || []).map((item) => item.policy?.id).filter(Boolean)
+  );
+  const complete = isConsentComplete(consentStatus);
 
-  const acceptedIds = new Set(consents.map((item) => item.policy?.id).filter(Boolean));
   const cards = policies
-    .map(
-      (policy) => `
+    .map((policy) => {
+      const accepted =
+        acceptedIds.has(policy.id) &&
+        (missingIds.size === 0 || !missingIds.has(policy.id));
+      return `
         <article class="policy-card">
           <div class="row-between">
             <h3>${escapeHtml(policy.kind.replaceAll("_", " "))}</h3>
-            <span class="${badgeClass(acceptedIds.has(policy.id) ? "active" : "open")}">${
-              acceptedIds.has(policy.id) ? "Accepted" : "Pending"
+            <span class="${badgeClass(accepted ? "active" : "open")}">${
+              accepted ? "Accepted" : "Required"
             }</span>
           </div>
           <p>${escapeHtml(policy.summary)}</p>
           <p class="muted">Version ${escapeHtml(policy.version)} · ${formatDate(policy.effectiveAt)}</p>
           ${
-            acceptedIds.has(policy.id)
+            accepted
               ? ""
               : `<button class="btn-secondary" type="button" data-accept="${policy.id}">Accept this policy</button>`
           }
         </article>
-      `
-    )
+      `;
+    })
     .join("");
 
+  const gateBanner = complete
+    ? `<section class="card prose">
+        <h2>You are cleared to generate</h2>
+        <p>All required policies are accepted. Generation still requires per-prompt attestations and passes the safety filter.</p>
+        <p><a class="btn-secondary" href="#/app/generate">Continue to Generate</a></p>
+      </section>`
+    : `<section class="card prose">
+        <h2>${requiredGate ? "Policy acceptance required" : "Accept policies to unlock Generate"}</h2>
+        <p>Before any image can be created, read and accept each policy below (Age gate, Acceptable use, Privacy, and Terms). Accept them one at a time. The API rejects generation until every record exists.</p>
+      </section>`;
+
   const content = `
+    ${gateBanner}
     <section class="card prose">
       <h2>What you can generate</h2>
       <p>Use this studio for original, fictional, or licensed-subject artwork. Prompts are screened before they reach a provider.</p>
@@ -198,24 +317,35 @@ export async function renderGuidelines({ user, path }) {
       user,
       path,
       title: "Guidelines",
-      subtitle: "Acceptable use, age gate, privacy, and terms.",
+      subtitle: complete
+        ? "All required policies accepted."
+        : "Acceptable use, age gate, privacy, and terms — required before Generate.",
       content,
     }),
     bind(root) {
       bindShell(root);
-      root.querySelectorAll("[data-accept]").forEach((button) => {
-        button.addEventListener("click", async () => {
-          button.disabled = true;
-          try {
-            await api("/me/consents", {
-              method: "POST",
-              body: { policy_document_id: button.dataset.accept },
-            });
-            window.dispatchEvent(new HashChangeEvent("hashchange"));
-          } catch (error) {
+
+      async function acceptPolicy(policyId, button) {
+        if (button) button.disabled = true;
+        try {
+          await api("/me/consents", {
+            method: "POST",
+            body: { policy_document_id: policyId },
+          });
+          return true;
+        } catch (error) {
+          if (button) {
             button.disabled = false;
             button.textContent = error.message;
           }
+          return false;
+        }
+      }
+
+      root.querySelectorAll("[data-accept]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const ok = await acceptPolicy(button.dataset.accept, button);
+          if (ok) window.dispatchEvent(new HashChangeEvent("hashchange"));
         });
       });
     },

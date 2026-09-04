@@ -74,6 +74,12 @@ enum AuthEventType {
   EMAIL_VERIFIED
 }
 
+/// Per-generation satisfaction: thumbs up/down (not a star scale).
+enum FeedbackVerdict {
+  UP
+  DOWN
+}
+
 model User {
   id              String        @id @default(cuid())
   email           String        @unique
@@ -97,9 +103,10 @@ model User {
   sessions           AuthSession[]
   consents           UserConsent[]
   promptLogs         PromptLog[]
-  reportsFiled       ContentReport[]    @relation("ReportsFiled")
-  moderationReceived ModerationAction[] @relation("ModerationTarget")
-  moderationIssued   ModerationAction[] @relation("ModerationActor")
+  generationFeedback GenerationFeedback[]
+  reportsFiled       ContentReport[]      @relation("ReportsFiled")
+  moderationReceived ModerationAction[]   @relation("ModerationTarget")
+  moderationIssued   ModerationAction[]   @relation("ModerationActor")
   authEvents         AuthEvent[]
 
   @@index([status])
@@ -185,6 +192,12 @@ model PromptLog {
   promptText  String
   imageBase64 String
   provider    String
+  /// Wall-clock provider call time in milliseconds (successful generations).
+  durationMs  Int?
+  /// Model / deployment id used for this generation (when known).
+  modelName   String?
+  /// Requested output size, e.g. 1024x1024.
+  imageSize   String?
 
   /// Required attestation: prompt complies with the acceptable-use policy.
   attestedEthicalUse         Boolean @default(false)
@@ -201,13 +214,35 @@ model PromptLog {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  reports ContentReport[]
+  reports  ContentReport[]
+  feedback GenerationFeedback?
 
   @@index([userId])
   @@index([sessionId])
   @@index([createdAt])
   @@index([safetyStatus])
   @@index([retentionExpiresAt])
+  @@index([durationMs])
+}
+
+/// Owner feedback on a single generation (quality / experience tags + optional remark).
+/// Separate from ContentReport (abuse). One feedback row per user per PromptLog.
+model GenerationFeedback {
+  id          String          @id @default(cuid())
+  promptLogId Int             @unique
+  promptLog   PromptLog       @relation(fields: [promptLogId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verdict     FeedbackVerdict
+  /// Structured reason codes, e.g. accurate, not_what_i_asked, felt_unsafe.
+  tags        String[]        @default([])
+  remark      String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([verdict])
+  @@index([createdAt])
 }
 
 model ContentReport {

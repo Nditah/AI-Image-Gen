@@ -21,11 +21,30 @@ def serialize_public_user(user) -> dict | None:
     }
 
 
+def serialize_feedback(feedback) -> dict | None:
+    if feedback is None:
+        return None
+    tags = getattr(feedback, "tags", None) or []
+    return {
+        "id": feedback.id,
+        "promptLogId": feedback.promptLogId,
+        "userId": feedback.userId,
+        "verdict": enum_value(feedback.verdict),
+        "tags": list(tags),
+        "remark": feedback.remark,
+        "createdAt": iso(feedback.createdAt),
+        "updatedAt": iso(feedback.updatedAt),
+    }
+
+
 def serialize_prompt_log(log, *, include_image: bool = False) -> dict:
     payload = {
         "id": log.id,
         "promptText": log.promptText,
         "provider": log.provider,
+        "modelName": getattr(log, "modelName", None),
+        "imageSize": getattr(log, "imageSize", None),
+        "durationMs": getattr(log, "durationMs", None),
         "safetyStatus": enum_value(log.safetyStatus),
         "blockedReason": log.blockedReason,
         "violationCategory": enum_value(log.violationCategory) or None,
@@ -34,6 +53,7 @@ def serialize_prompt_log(log, *, include_image: bool = False) -> dict:
         "createdAt": iso(log.createdAt),
         "hasImage": bool(getattr(log, "imageBase64", "")),
         "user": serialize_public_user(getattr(log, "user", None)),
+        "feedback": serialize_feedback(getattr(log, "feedback", None)),
     }
     if include_image:
         payload["image_base64"] = getattr(log, "imageBase64", "") or ""

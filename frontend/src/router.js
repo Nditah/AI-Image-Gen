@@ -1,6 +1,7 @@
 import { getStoredUser, isStaff } from "./auth.js";
 import { fetchMe } from "./api.js";
 import { renderAdminLogin, renderLogin, renderRegister } from "./views/auth.js";
+import { renderHelp } from "./views/help.js";
 import {
   renderAccount,
   renderGallery,
@@ -55,6 +56,7 @@ export async function renderApp() {
     "/app/generate": renderGenerate,
     "/app/gallery": renderGallery,
     "/app/guidelines": renderGuidelines,
+    "/app/help": renderHelp,
     "/app/account": renderAccount,
   };
 
