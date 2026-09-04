@@ -4,12 +4,8 @@ from pydantic import BaseModel, Field, field_validator
 
 ProviderName = Literal[
     "openai",
-    "gemini",
     "stability",
     "huggingface",
-    "replicate",
-    "bedrock",
-    "azure",
 ]
 AccountStatusName = Literal["PENDING_VERIFICATION", "ACTIVE", "SUSPENDED", "BANNED"]
 UserRoleName = Literal["USER", "MODERATOR", "ADMIN"]

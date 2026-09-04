@@ -5,6 +5,7 @@ const ICONS = {
   generate: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM18.5 15.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6zM5.5 14.5l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"/></svg>`,
   gallery: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13zm2.5 1.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM6 17l3.5-4.5 2.5 3 3.5-4.5L18 17H6z"/></svg>`,
   guidelines: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a2 2 0 0 1 2 2v13.2a.8.8 0 0 1-1.3.6L12 16.5l-5.7 3.3A.8.8 0 0 1 5 19.2V6a2 2 0 0 1 2-2zm0 2v11.1l4.2-2.4a1.5 1.5 0 0 1 1.6 0L17 17.1V6H7z"/></svg>`,
+  help: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm0 4.2a1.1 1.1 0 0 0-1.1 1.1v.2c0 .9.5 1.4 1.2 1.8.8.5 1.3.9 1.3 1.7 0 .7-.5 1.2-1.2 1.2-.8 0-1.3-.5-1.3-1.2H9.6c0 1.5 1.1 2.5 2.6 2.5 1.6 0 2.7-1 2.7-2.5 0-1.1-.6-1.7-1.5-2.2-.7-.4-1.1-.7-1.1-1.3v-.2c0-.4.3-.7.7-.7.5 0 .8.3.8.8h1.4A2.1 2.1 0 0 0 12 7.2zM12 15.2a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2z"/></svg>`,
   account: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm0 10c4.2 0 8 2.1 8 4.5V20H4v-1.5C4 16.1 7.8 14 12 14z"/></svg>`,
   overview: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4V4zm9 0h7v4h-7V4zM4 13h7v7H4v-7zm9 6v-9h7v9h-7z"/></svg>`,
   users: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7zm7.5-1a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zM3 19.2C3 16.5 6.1 15 9 15s6 1.5 6 4.2V20H3v-.8zm12.5-.2c0-1.4.6-2.5 1.6-3.3 1 .4 2.1.6 3.4.6 1.7 0 3.2-.5 4-.9v3.8h-9z"/></svg>`,
@@ -59,6 +60,7 @@ export function renderShell({ user, path, title, subtitle = "", content }) {
       navLink("#/app/generate", "Generate", "generate", path),
       navLink("#/app/gallery", "Gallery", "gallery", path),
       navLink("#/app/guidelines", "Guidelines", "guidelines", path),
+      navLink("#/app/help", "Help", "help", path),
       navLink("#/app/account", "Account", "account", path),
     ].join("")
   );

@@ -11,6 +11,7 @@ import {
   makeGroupedBar,
   makeLine,
 } from "../charts.js";
+import { FEEDBACK_TAGS } from "../feedback.js";
 import { bindShell, emptyState, pager, renderShell } from "../layout.js";
 
 function escapeHtml(value) {
@@ -19,6 +20,95 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function formatDuration(ms) {
+  if (ms == null || ms === "") return "—";
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return "—";
+  if (n < 1000) return `${n} ms`;
+  return `${(n / 1000).toFixed(1)} s`;
+}
+
+function feedbackTagLabel(tagId) {
+  return FEEDBACK_TAGS.find((tag) => tag.id === tagId)?.label || String(tagId).replaceAll("_", " ");
+}
+
+function detailRow(label, valueHtml) {
+  return `<div class="detail-row"><dt>${escapeHtml(label)}</dt><dd>${valueHtml}</dd></div>`;
+}
+
+function generationDetailHtml(item) {
+  const user = item.user;
+  const fb = item.feedback;
+  const src = item.hasImage || item.image_base64 ? imageSrc(item.image_base64) : "";
+  const tags =
+    fb?.tags?.length > 0
+      ? fb.tags.map((tag) => `<span class="badge">${escapeHtml(feedbackTagLabel(tag))}</span>`).join(" ")
+      : `<span class="muted">None</span>`;
+
+  const feedbackBlock = fb
+    ? `
+      <div class="detail-feedback">
+        <div class="row-gap">
+          <span class="${badgeClass(fb.verdict === "UP" ? "allowed" : "flagged")}">${
+            fb.verdict === "UP" ? "Thumbs up" : "Thumbs down"
+          }</span>
+          <span class="muted">Updated ${escapeHtml(formatDate(fb.updatedAt || fb.createdAt))}</span>
+        </div>
+        <div class="detail-tags">${tags}</div>
+        ${
+          fb.remark
+            ? `<blockquote class="detail-remark">${escapeHtml(fb.remark)}</blockquote>`
+            : `<p class="muted">No remark left.</p>`
+        }
+      </div>
+    `
+    : `<p class="muted">No user feedback yet.</p>`;
+
+  return `
+    <div class="generation-detail-layout">
+      <div class="generation-detail-media">
+        ${
+          src
+            ? `<img src="${src}" alt="Generation preview" />`
+            : `<div class="gallery-missing">No image stored</div>`
+        }
+      </div>
+      <div class="generation-detail-body">
+        <h3>Prompt</h3>
+        <p class="detail-prompt">${escapeHtml(item.promptText)}</p>
+        <dl class="detail-grid">
+          ${detailRow("ID", `#${escapeHtml(item.id)}`)}
+          ${detailRow(
+            "User",
+            escapeHtml(user?.email || "Anonymous") +
+              (user?.displayName ? ` <span class="muted">(${escapeHtml(user.displayName)})</span>` : "")
+          )}
+          ${detailRow("Role / status", `${escapeHtml(user?.role || "—")} · ${escapeHtml(user?.status || "—")}`)}
+          ${detailRow("Provider", escapeHtml(item.provider || "—"))}
+          ${detailRow("Model", escapeHtml(item.modelName || "—"))}
+          ${detailRow("Image size", escapeHtml(item.imageSize || "—"))}
+          ${detailRow("Latency", escapeHtml(formatDuration(item.durationMs)))}
+          ${detailRow(
+            "Safety",
+            `<span class="${badgeClass(item.safetyStatus)}">${escapeHtml(item.safetyStatus || "—")}</span>`
+          )}
+          ${detailRow("Blocked reason", escapeHtml(item.blockedReason || "—"))}
+          ${detailRow("Violation", escapeHtml(item.violationCategory || "—"))}
+          ${detailRow(
+            "Attestations",
+            `Ethical use: ${item.attestedEthicalUse ? "yes" : "no"} · No real-person misuse: ${
+              item.attestedNoRealPersonMisuse ? "yes" : "no"
+            }`
+          )}
+          ${detailRow("Created", escapeHtml(formatDate(item.createdAt)))}
+        </dl>
+        <h3>User review</h3>
+        ${feedbackBlock}
+      </div>
+    </div>
+  `;
 }
 
 function statCard(label, value, hint = "") {
@@ -30,12 +120,8 @@ function statCard(label, value, hint = "") {
 function providerLabel(name) {
   const map = {
     openai: "OpenAI",
-    gemini: "Gemini",
     stability: "Stability",
     huggingface: "HuggingFace",
-    replicate: "Replicate",
-    bedrock: "Bedrock",
-    azure: "Azure",
   };
   return map[String(name || "").toLowerCase()] || String(name || "Unknown");
 }
@@ -644,7 +730,7 @@ export async function renderAdminGenerations({ user, path, query }) {
           <td>${formatDate(item.createdAt)}</td>
           <td>
             <div class="table-actions">
-              ${item.hasImage ? `<button type="button" class="btn-secondary" data-preview="${item.id}">View</button>` : ""}
+              <button type="button" class="btn-secondary" data-preview="${item.id}">Details</button>
               ${
                 item.hasImage
                   ? `<button type="button" class="btn-danger" data-remove="${item.id}" data-user="${item.user?.id || ""}">Remove</button>`
@@ -683,10 +769,12 @@ export async function renderAdminGenerations({ user, path, query }) {
           )}`
         : emptyState("No generations", "Logs appear after users create or attempt images.")
     }
-    <dialog id="preview-dialog" class="preview-dialog">
-      <form method="dialog"><button class="btn-ghost" type="submit">Close</button></form>
-      <img id="preview-image" alt="Generation preview" />
-      <p id="preview-caption" class="muted"></p>
+    <dialog id="preview-dialog" class="preview-dialog generation-detail-dialog">
+      <div class="generation-detail-header">
+        <h2>Generation details</h2>
+        <form method="dialog"><button class="btn-ghost" type="submit">Close</button></form>
+      </div>
+      <div id="preview-detail" class="generation-detail-content"></div>
     </dialog>
     <p id="admin-status" class="hint hidden"></p>
   `;
@@ -707,20 +795,21 @@ export async function renderAdminGenerations({ user, path, query }) {
         window.location.hash = `#/admin/generations?q=${encodeURIComponent(form.q.value.trim())}&safety=${encodeURIComponent(form.safety.value)}`;
       });
       const dialog = root.querySelector("#preview-dialog");
-      const previewImage = root.querySelector("#preview-image");
-      const caption = root.querySelector("#preview-caption");
+      const detailEl = root.querySelector("#preview-detail");
       const status = root.querySelector("#admin-status");
 
       root.querySelectorAll("[data-preview]").forEach((button) => {
         button.addEventListener("click", async () => {
+          button.disabled = true;
           try {
             const item = await api(`/admin/generations/${button.dataset.preview}`);
-            previewImage.src = imageSrc(item.image_base64);
-            caption.textContent = item.promptText;
+            detailEl.innerHTML = generationDetailHtml(item);
             dialog.showModal();
           } catch (err) {
             status.textContent = err.message;
             status.classList.remove("hidden");
+          } finally {
+            button.disabled = false;
           }
         });
       });

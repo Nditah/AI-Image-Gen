@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 def _safe_error_message(message: str, fallback: str) -> str:
-    lowered = message.lower()
-    if "traceback" in lowered or "\n" in message:
+    cleaned = " ".join((message or "").split())
+    lowered = cleaned.lower()
+    if "traceback" in lowered:
         return fallback
-    return message[:300] if message else fallback
+    return cleaned[:300] if cleaned else fallback
 
 
 async def _persist_blocked_prompt(
@@ -145,10 +146,17 @@ async def generate_image(
             content={"error": _safe_error_message(str(exc), "Provider configuration error"), "provider": exc.provider},
         )
     except ProviderRuntimeError as exc:
-        logger.exception("Provider runtime error")
+        if exc.status_code == 429:
+            logger.warning("Provider rate/quota limit: %s", exc)
+        else:
+            logger.exception("Provider runtime error")
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": _safe_error_message(str(exc), "Provider request failed"), "provider": exc.provider},
+            content={
+                "error": _safe_error_message(str(exc), "Provider request failed"),
+                "provider": exc.provider,
+                "code": "PROVIDER_QUOTA" if exc.status_code == 429 else "PROVIDER_ERROR",
+            },
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unhandled image generation error")

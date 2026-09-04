@@ -1,6 +1,7 @@
 import { api, badgeClass, formatDate, imageSrc, isConsentComplete } from "../api.js";
 import { bindFeedbackPanels, feedbackPanelHtml } from "../feedback.js";
 import { bindShell, emptyState, pager, renderShell } from "../layout.js";
+import { bindGalleryLightbox, galleryLightboxHtml } from "../lightbox.js";
 
 function escapeHtml(value) {
   return String(value || "")
@@ -56,12 +57,8 @@ export async function renderGenerate({ user, path }) {
             <p class="field-hint">Choose which model service will create the image.</p>
             <select id="provider" name="provider">
               <option value="openai">OpenAI</option>
-              <option value="gemini">Gemini</option>
               <option value="stability">Stability AI</option>
               <option value="huggingface">HuggingFace</option>
-              <option value="replicate">Replicate</option>
-              <option value="bedrock">AWS Bedrock (Titan)</option>
-              <option value="azure">Azure OpenAI</option>
             </select>
           </div>
 
@@ -177,12 +174,32 @@ export async function renderGallery({ user, path, query }) {
     error = err.message;
   }
 
-  const cards = (data.items || [])
+  const items = data.items || [];
+  const slides = [];
+
+  const cards = items
     .map((item) => {
       const src = item.hasImage ? imageSrc(item.image_base64) : "";
+      let thumb = `<div class="gallery-missing">No image stored</div>`;
+      if (src) {
+        const slideIndex = slides.length;
+        slides.push({
+          src,
+          prompt: item.promptText || "",
+          meta: `${item.provider || "—"} · ${formatDate(item.createdAt)}`,
+        });
+        thumb = `
+          <button type="button" class="gallery-thumb" data-lightbox-open="${slideIndex}" aria-label="View full image">
+            <img src="${src}" alt="${escapeHtml(item.promptText || "Generated image")}" loading="lazy" />
+            <span class="gallery-thumb-overlay" aria-hidden="true">
+              <span class="gallery-thumb-hint">View</span>
+            </span>
+          </button>
+        `;
+      }
       return `
         <article class="gallery-card">
-          ${src ? `<img src="${src}" alt="" />` : `<div class="gallery-missing">No image stored</div>`}
+          ${thumb}
           <div class="gallery-meta">
             <p>${escapeHtml(item.promptText)}</p>
             <div class="row-gap">
@@ -199,8 +216,8 @@ export async function renderGallery({ user, path, query }) {
   const content = `
     ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
     ${
-      data.items?.length
-        ? `<div class="gallery-grid">${cards}</div>${pager(data.page, data.total, data.limit, "#/app/gallery?page=")}`
+      items.length
+        ? `<div class="gallery-grid">${cards}</div>${pager(data.page, data.total, data.limit, "#/app/gallery?page=")}${galleryLightboxHtml()}`
         : emptyState("No generations yet", "Your images will appear here after you create one.")
     }
   `;
@@ -216,6 +233,7 @@ export async function renderGallery({ user, path, query }) {
     bind(root) {
       bindShell(root);
       bindFeedbackPanels(root, api);
+      bindGalleryLightbox(root, slides);
     },
   };
 }

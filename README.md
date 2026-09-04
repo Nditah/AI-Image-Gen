@@ -12,12 +12,8 @@
   <a href="https://vitejs.dev/"><img src="https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite" /></a>
   <a href="https://docs.docker.com/compose/"><img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
   <a href="https://platform.openai.com/docs/guides/images"><img src="https://img.shields.io/badge/OpenAI-GPT%20Image-412991?style=flat-square&logo=openai&logoColor=white" alt="OpenAI" /></a>
-  <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Gemini-Image-4285F4?style=flat-square&logo=googlegemini&logoColor=white" alt="Google Gemini" /></a>
   <a href="https://platform.stability.ai/"><img src="https://img.shields.io/badge/Stability-Core-7C3AED?style=flat-square" alt="Stability AI" /></a>
   <a href="https://huggingface.co/"><img src="https://img.shields.io/badge/HuggingFace-Inference-FFD21E?style=flat-square&logo=huggingface&logoColor=black" alt="Hugging Face" /></a>
-  <a href="https://replicate.com/"><img src="https://img.shields.io/badge/Replicate-Flux-000000?style=flat-square" alt="Replicate" /></a>
-  <a href="https://console.aws.amazon.com/bedrock/home"><img src="https://img.shields.io/badge/AWS-Bedrock-FF9900?style=flat-square&logo=amazonaws&logoColor=white" alt="AWS Bedrock" /></a>
-  <a href="https://portal.azure.com"><img src="https://img.shields.io/badge/Azure-OpenAI-0078D4?style=flat-square&logo=microsoftazure&logoColor=white" alt="Azure OpenAI" /></a>
 </p>
 
 Turn a text prompt into an image. A Vite frontend talks to a FastAPI backend, which screens the prompt, calls the selected provider, and stores `sessionId`, prompt, base64 image, and provider in PostgreSQL via Prisma.
@@ -38,16 +34,29 @@ Turn a text prompt into an image. A Vite frontend talks to a FastAPI backend, wh
 
 ## Contents
 
-- [How it works](#how-it-works)
-- [Safety platform](#safety-platform)
-- [Supported providers](#supported-providers)
-- [Prerequisites](#prerequisites)
-- [Run with Docker](#run-with-docker-recommended)
-- [Run locally](#run-locally-without-docker)
-- [Seed accounts](#seed-accounts)
-- [API](#api)
-- [Project structure](#project-structure)
-- [Troubleshooting](#troubleshooting)
+- [AI Image Generator](#ai-image-generator)
+  - [Contents](#contents)
+  - [How it works](#how-it-works)
+  - [Safety platform](#safety-platform)
+    - [Layers (what is enforced)](#layers-what-is-enforced)
+    - [Policy consents (account-level)](#policy-consents-account-level)
+    - [Per-prompt attestations](#per-prompt-attestations)
+    - [Automated prompt filter](#automated-prompt-filter)
+    - [Retention and admin oversight](#retention-and-admin-oversight)
+    - [Generation feedback (optional)](#generation-feedback-optional)
+    - [Limits (document honestly)](#limits-document-honestly)
+  - [Supported providers](#supported-providers)
+  - [Prerequisites](#prerequisites)
+  - [Run with Docker (recommended)](#run-with-docker-recommended)
+  - [Run locally (without Docker)](#run-locally-without-docker)
+    - [1. PostgreSQL](#1-postgresql)
+    - [2. Backend](#2-backend)
+    - [3. Frontend](#3-frontend)
+  - [Seed accounts](#seed-accounts)
+  - [API](#api)
+    - [`POST /generate`](#post-generate)
+  - [Project structure](#project-structure)
+  - [Troubleshooting](#troubleshooting)
 
 ## How it works
 
@@ -62,7 +71,7 @@ flowchart LR
   E --> F[Safety filter]
   F -->|blocked| B
   F -->|allowed| G[Provider factory]
-  G --> H[OpenAI / Gemini / Stability<br/>HuggingFace / Replicate<br/>Bedrock / Azure]
+  G --> H[OpenAI / Stability<br/>HuggingFace]
   B --> I[(PostgreSQL)]
 ```
 
@@ -136,13 +145,9 @@ Set `IMAGE_PROVIDER` to one of the values below. The UI can override it per requ
 
 | Provider | Default model / API | Environment variable | API key / console |
 | :--- | :--- | :--- | :--- |
-| OpenAI | `gpt-image-1` | `OPENAI_API_KEY` | [platform.openai.com/account/api-keys](https://platform.openai.com/account/api-keys) |
-| Gemini | `gemini-2.0-flash-preview-image-generation` | `GEMINI_API_KEY` | [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) |
+| OpenAI | `gpt-image-2` | `OPENAI_API_KEY` | [platform.openai.com/account/api-keys](https://platform.openai.com/account/api-keys) |
 | Stability AI | Stable Image Core | `STABILITY_API_KEY` | [platform.stability.ai/account/keys](https://platform.stability.ai/account/keys) |
-| HuggingFace | `stabilityai/stable-diffusion-xl-base-1.0` | `HUGGINGFACE_API_KEY` | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| Replicate | `black-forest-labs/flux-schnell` | `REPLICATE_API_KEY` | [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens) |
-| AWS Bedrock | `amazon.titan-image-generator-v2:0` | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | [console.aws.amazon.com/bedrock](https://console.aws.amazon.com/bedrock/home) |
-| Azure OpenAI | deployment `gpt-image-1` | `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_DEPLOYMENT` | [portal.azure.com](https://portal.azure.com) (Azure OpenAI Service) |
+| HuggingFace | `black-forest-labs/FLUX.1-schnell` (via Inference Providers, e.g. fal-ai) | `HUGGINGFACE_API_KEY` | [tokens](https://huggingface.co/settings/tokens) + [provider settings](https://huggingface.co/settings/inference-providers) |
 
 ## Prerequisites
 
@@ -293,7 +298,7 @@ Override with `SEED_ADMIN_PASSWORD` and `SEED_USER_PASSWORD`. Seed users still m
 
 Interactive docs: http://localhost:8000/docs
 
-The UI uses hash routes: `#/login`, `#/admin/login`, `#/app/guidelines`, `#/app/generate`, `#/admin`.
+The UI uses hash routes: `#/login`, `#/admin/login`, `#/app/guidelines`, `#/app/generate`, `#/app/gallery`, `#/app/help`, `#/admin`.
 
 ### `POST /generate`
 
@@ -335,7 +340,7 @@ curl -s http://localhost:8000/generate \
 ```
 
 - `prompt` — required, 3–1000 characters
-- `provider` — optional: `openai` · `gemini` · `stability` · `huggingface` · `replicate` · `bedrock` · `azure` (defaults to `IMAGE_PROVIDER`)
+- `provider` — optional: `openai` · `stability` · `huggingface` (defaults to `IMAGE_PROVIDER`)
 - `attested_ethical_use` / `attested_no_real_person_misuse` — required `true`
 - Header `Authorization: Bearer <token>` — required
 
@@ -408,3 +413,5 @@ curl -s http://localhost:8000/generate \
 | Generate form disabled / `CONSENT_REQUIRED` | Accept each required policy on `#/app/guidelines`, then return to Generate |
 | `POLICIES_NOT_CONFIGURED` | Run `python prisma/seed.py` so Age/AUP/Privacy/Terms exist |
 | `PROMPT_BLOCKED` | Safety filter rejected the prompt before a provider was called |
+
+

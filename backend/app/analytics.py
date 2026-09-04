@@ -8,12 +8,8 @@ from .security import enum_value
 
 PROVIDERS = (
     "openai",
-    "gemini",
     "stability",
     "huggingface",
-    "replicate",
-    "bedrock",
-    "azure",
 )
 
 TAG_LABELS = {

@@ -10,6 +10,9 @@ export const FEEDBACK_TAGS = [
   { id: "provider_issue", label: "Provider issue" },
 ];
 
+const THUMB_UP_ICON = `<svg class="feedback-thumb-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 21h4V9H2v12zm20.83-9.17c-.18-.41-.53-.7-.95-.8L14.5 9.5V5c0-1.66-1.34-3-3-3-.55 0-1 .45-1 1v.5c0 .83-.34 1.58-.88 2.12L6.5 9.5V21h11.19c.81 0 1.52-.5 1.8-1.25l2.34-6.56c.18-.5.1-1.05-.2-1.46z"/></svg>`;
+const THUMB_DOWN_ICON = `<svg class="feedback-thumb-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22 3h-4v12h4V3zM2.17 12.17c.18.41.53.7.95.8L9.5 14.5V19c0 1.66 1.34 3 3 3 .55 0 1-.45 1-1v-.5c0-.83.34-1.58.88-2.12l3.12-3.12V3H6.31c-.81 0-1.52.5-1.8 1.25L2.17 10.81c-.18.5-.1 1.05.2 1.36z"/></svg>`;
+
 export function feedbackPanelHtml(generationId, feedback = null, { compact = false } = {}) {
   const id = Number(generationId);
   if (!Number.isFinite(id) || id < 1) return "";
@@ -30,8 +33,8 @@ export function feedbackPanelHtml(generationId, feedback = null, { compact = fal
     <form class="feedback-panel ${compact ? "is-compact" : ""}" data-feedback="${id}" novalidate>
       <p class="feedback-heading">${feedback ? "Your feedback" : "How was this result?"}</p>
       <div class="feedback-thumbs" role="group" aria-label="Satisfaction">
-        <button type="button" class="feedback-thumb ${verdict === "UP" ? "is-active" : ""}" data-verdict="UP" aria-pressed="${verdict === "UP"}">Helpful</button>
-        <button type="button" class="feedback-thumb ${verdict === "DOWN" ? "is-active" : ""}" data-verdict="DOWN" aria-pressed="${verdict === "DOWN"}">Not helpful</button>
+        <button type="button" class="feedback-thumb ${verdict === "UP" ? "is-active" : ""}" data-verdict="UP" aria-pressed="${verdict === "UP"}" aria-label="Thumbs up" title="Thumbs up">${THUMB_UP_ICON}</button>
+        <button type="button" class="feedback-thumb ${verdict === "DOWN" ? "is-active" : ""}" data-verdict="DOWN" aria-pressed="${verdict === "DOWN"}" aria-label="Thumbs down" title="Thumbs down">${THUMB_DOWN_ICON}</button>
       </div>
       <div class="feedback-tags">${tags}</div>
       <label class="feedback-remark-label" for="feedback-remark-${id}">Remark <span class="muted">(optional)</span></label>
@@ -80,7 +83,7 @@ export function bindFeedbackPanels(root, api) {
       if (!verdict) {
         if (statusEl) {
           statusEl.hidden = false;
-          statusEl.textContent = "Choose Helpful or Not helpful.";
+          statusEl.textContent = "Choose thumbs up or thumbs down.";
         }
         return;
       }
