@@ -37,6 +37,10 @@ Turn a text prompt into an image. A Vite frontend talks to a FastAPI backend, wh
 - [AI Image Generator](#ai-image-generator)
   - [Contents](#contents)
   - [How it works](#how-it-works)
+    - [Overall system](#overall-system)
+  - [Actors and use cases](#actors-and-use-cases)
+  - [Class diagram](#class-diagram)
+  - [ERD](#erd)
   - [Safety platform](#safety-platform)
     - [Layers (what is enforced)](#layers-what-is-enforced)
     - [Policy consents (account-level)](#policy-consents-account-level)
@@ -60,19 +64,95 @@ Turn a text prompt into an image. A Vite frontend talks to a FastAPI backend, wh
 
 ## How it works
 
+### Overall system
+
+Actors use the Vite UI. FastAPI is the only process that reads PostgreSQL and calls a cloud image API. Staff can use the studio and the admin console.
+
 ```mermaid
-flowchart LR
-  A[Browser<br/>:5173] --> B[FastAPI<br/>:8000]
-  B --> C{Auth + account}
-  C -->|blocked| B
-  C --> D{Policy consents}
-  D -->|missing| B
-  D --> E{Prompt attestations}
-  E --> F[Safety filter]
-  F -->|blocked| B
-  F -->|allowed| G[Provider factory]
-  G --> H[OpenAI / Stability<br/>HuggingFace]
-  B --> I[(PostgreSQL)]
+flowchart TB
+    Guest([Guest])
+    Member([Registered user])
+    Staff([Moderator / Admin])
+
+    subgraph FE["Vite frontend :5173"]
+        AuthUI["Login · register · admin login"]
+        Studio["Generate · gallery · guidelines · account · help"]
+        AdminUI["Overview · users · generations · reports · auth events"]
+    end
+
+    subgraph API["FastAPI :8000"]
+        AuthR["Auth router"]
+        UserR["User / consent / gallery router"]
+        GenR["Generate router"]
+        AdminR["Admin router"]
+        Gates{"Session · ACTIVE+18+ · policies · attestations"}
+        Filter{"Safety filter"}
+        Factory["Provider factory"]
+    end
+
+    PG[("PostgreSQL")]
+    Cloud["OpenAI · Stability · Hugging Face"]
+
+    Guest --> AuthUI
+    Member --> Studio
+    Staff --> AdminUI
+    Staff --> Studio
+
+    AuthUI -->|"POST /auth/*"| AuthR
+    Studio -->|"/policies /me/*"| UserR
+    Studio -->|"POST /generate + Bearer"| GenR
+    AdminUI -->|"/admin/*"| AdminR
+
+    AuthR --> PG
+    UserR --> PG
+    AdminR --> PG
+
+    GenR --> Gates
+    Gates -->|401 / 403 / 400| Studio
+    Gates --> Filter
+    Filter -->|blocked: write PromptLog| PG
+    Filter -->|400 PROMPT_BLOCKED| Studio
+    Filter -->|allowed| Factory
+    Factory -->|"HTTPS + API key"| Cloud
+    Cloud -->|image bytes / base64| Factory
+    Factory -->|write PromptLog ALLOWED| PG
+    Factory -->|JSON image_base64| Studio
+```
+
+Four tiers. The browser never calls a provider, and PostgreSQL never calls the cloud. The FastAPI process is the only hop that talks to both.
+
+```mermaid
+flowchart TD
+    Client["<b>Client tier</b><br/>Vite frontend :5173<br/>login, guidelines, studio, gallery, admin"]
+    Server["<b>Server tier</b><br/>FastAPI :8000<br/>Pydantic · bearer auth · consents<br/>attestations · safety filter<br/>provider factory · Prisma"]
+    Database[("<b>Database tier</b><br/>PostgreSQL<br/>users, sessions, policies<br/>PromptLog, feedback, reports")]
+    Cloud["<b>Cloud inference tier</b><br/>OpenAI · Stability · Hugging Face"]
+
+    Client -->|"HTTP + Bearer token"| Server
+    Server -->|"Prisma / SQL"| Database
+    Database -->|"session, user, consents, logs"| Server
+    Server -->|"HTTPS + provider API key"| Cloud
+    Cloud -->|"image bytes / base64"| Server
+    Server -->|"JSON image_base64"| Client
+```
+
+`POST /generate` fails closed at each gate. Blocked prompts are logged and never sent to a provider.
+
+```mermaid
+flowchart TD
+    Req["POST /generate<br/>prompt, provider, attestations"] --> Auth{"Bearer session<br/>ACTIVE + 18+"}
+    Auth -->|401 UNAUTHORIZED<br/>403 ACCOUNT_RESTRICTED| Err[JSON error to client]
+    Auth --> Consents{"Latest Age gate, AUP,<br/>Privacy, Terms"}
+    Consents -->|403 CONSENT_REQUIRED| Err
+    Consents --> Attest{"Both attestations true"}
+    Attest -->|400 ATTESTATION_REQUIRED| Err
+    Attest --> Filter{"Prompt safety filter"}
+    Filter -->|blocked| LogB["Write PromptLog<br/>safetyStatus = BLOCKED"]
+    LogB --> Blocked["400 PROMPT_BLOCKED"]
+    Filter -->|allowed| Factory[Provider factory]
+    Factory --> Cloud["Selected provider API"]
+    Cloud --> LogA["Write PromptLog<br/>safetyStatus = ALLOWED"]
+    LogA --> Ok["200 image_base64"]
 ```
 
 1. Sign in as a user (`#/login`) or admin (`#/admin/login`).
@@ -82,6 +162,510 @@ flowchart LR
 5. The API re-checks auth, account status, policy consents, and attestations, then screens the prompt. Blocked text never reaches a provider.
 6. The selected provider returns a 1024×1024 image as base64. A `PromptLog` row is stored against the user (with retention metadata).
 7. The UI renders the image and saves it to **My gallery**.
+
+## Actors and use cases
+
+Primary actors sit on the left. The **image provider** is a secondary actor (OpenAI, Stability, or Hugging Face). `ADMIN` and `MODERATOR` are both staff; only an administrator can ban, reinstate, or change roles.
+
+### Actors
+
+| Actor | Kind | Who |
+| :--- | :--- | :--- |
+| **Guest** | Primary | Unauthenticated visitor (`#/login`, `#/register`, `#/admin/login`) |
+| **Registered user** | Primary | Signed-in `USER` (studio, gallery, guidelines, account) |
+| **Moderator** | Primary | Staff: review queues, warn / suspend, remove content. Cannot ban or change roles |
+| **Administrator** | Primary | Staff plus ban, reinstate, and `PATCH /admin/users` role/status |
+| **Image provider** | Secondary | External image API invoked only after all generate gates pass |
+
+Staff can also use the studio (same generate path as a registered user).
+
+### Use cases
+
+| ID | Use case | Actor(s) | Notes |
+| :--- | :--- | :--- | :--- |
+| UC01 | Register account | Guest | Must confirm 18+ (`AGE_GATE`); creates `USER` + session |
+| UC02 | Sign in | Guest | User or admin login form; same `/auth/login` |
+| UC03 | Sign out | User, Moderator, Admin | Revokes bearer session |
+| UC04 | View / update profile | User, Moderator, Admin | `#/app/account`, `PATCH /me` |
+| UC05 | View help | User, Moderator, Admin | `#/app/help` |
+| UC06 | Accept policies | User, Moderator, Admin | Age gate, AUP, Privacy, Terms — one-by-one |
+| UC07 | Generate image | User, Moderator, Admin | `#/app/generate` → `POST /generate` |
+| UC08 | Confirm attestations | *(included by UC07)* | `attested_ethical_use`, `attested_no_real_person_misuse` |
+| UC09 | Screen prompt | *(included by UC07)* | Safety filter before any provider call |
+| UC10 | Invoke image provider | UC07 + Image provider | Factory → OpenAI / Stability / Hugging Face |
+| UC11 | Browse own gallery | User, Moderator, Admin | `#/app/gallery` |
+| UC12 | Leave generation feedback | User, Moderator, Admin | Thumbs + tags; not an abuse report |
+| UC13 | Report content | User, Moderator, Admin | `POST /me/reports` |
+| UC14 | View overview / analytics | Moderator, Admin | `#/admin` stats and charts |
+| UC15 | Search users | Moderator, Admin | `#/admin/users` |
+| UC16 | Review generations | Moderator, Admin | `#/admin/generations` |
+| UC17 | Review reports | Moderator, Admin | Open / under review / actioned / dismissed |
+| UC18 | Apply moderation | Moderator, Admin | `WARN`, `SUSPEND`, `REMOVE_CONTENT` |
+| UC19 | Ban or reinstate account | Admin | `BAN` / `REINSTATE` only |
+| UC20 | Change user role or status | Admin | `PATCH /admin/users/{id}` |
+| UC21 | View auth events | Moderator, Admin | Register / login / logout / failures |
+
+**Include:** UC07 includes UC06 (must already be complete), UC08, UC09, and UC10.
+
+**Extend:** UC19 and UC20 extend staff administration; only **Administrator** may perform them.
+
+### Use-case diagram (studio)
+
+```mermaid
+flowchart LR
+    Guest(["Guest"])
+    Member(["Registered user"])
+    Provider(["Image provider"])
+
+    subgraph Studio["AI Image Generator — studio"]
+        UC01((Register account))
+        UC02((Sign in))
+        UC03((Sign out))
+        UC04((View / update profile))
+        UC06((Accept policies))
+        UC07((Generate image))
+        UC08((Confirm attestations))
+        UC09((Screen prompt))
+        UC10((Invoke image provider))
+        UC11((Browse own gallery))
+        UC12((Leave feedback))
+        UC13((Report content))
+    end
+
+    Guest --- UC01
+    Guest --- UC02
+    Member --- UC03
+    Member --- UC04
+    Member --- UC06
+    Member --- UC07
+    Member --- UC11
+    Member --- UC12
+    Member --- UC13
+    UC07 -.->|<<include>>| UC06
+    UC07 -.->|<<include>>| UC08
+    UC07 -.->|<<include>>| UC09
+    UC07 -.->|<<include>>| UC10
+    UC10 --- Provider
+```
+
+### Use-case diagram (staff)
+
+```mermaid
+flowchart LR
+    Mod(["Moderator"])
+    Admin(["Administrator"])
+
+    subgraph Staff["AI Image Generator — admin console"]
+        UC14((View analytics))
+        UC15((Search users))
+        UC16((Review generations))
+        UC17((Review reports))
+        UC18((Apply moderation))
+        UC19((Ban or reinstate))
+        UC20((Change role or status))
+        UC21((View auth events))
+    end
+
+    Mod --- UC14
+    Mod --- UC15
+    Mod --- UC16
+    Mod --- UC17
+    Mod --- UC18
+    Mod --- UC21
+    Admin --- UC14
+    Admin --- UC15
+    Admin --- UC16
+    Admin --- UC17
+    Admin --- UC18
+    Admin --- UC19
+    Admin --- UC20
+    Admin --- UC21
+    UC19 -.->|<<extend>>| UC18
+```
+
+## Class diagram
+
+Two views: **domain** (Prisma / PostgreSQL) and **application** (FastAPI, safety, providers). There is no `image_url` entity — generations store `imageBase64` on `PromptLog`. `AuthSession` is the login session; `PromptLog.sessionId` is only the client `X-Session-Id` correlation id.
+
+### Domain (Prisma)
+
+```mermaid
+classDiagram
+    class User {
+        +String id
+        +String email
+        +String passwordHash
+        +String displayName
+        +UserRole role
+        +AccountStatus status
+        +Boolean isAdult
+        +DateTime ageAttestedAt
+        +DateTime suspendedUntil
+        +DateTime lastLoginAt
+    }
+
+    class AuthIdentity {
+        +String id
+        +String provider
+        +String providerUserId
+    }
+
+    class AuthSession {
+        +String id
+        +String tokenHash
+        +String ipAddress
+        +DateTime expiresAt
+        +DateTime revokedAt
+    }
+
+    class AuthEvent {
+        +String id
+        +AuthEventType type
+        +String ipAddress
+        +String metadata
+    }
+
+    class PolicyDocument {
+        +String id
+        +PolicyKind kind
+        +String version
+        +DateTime effectiveAt
+        +String summary
+    }
+
+    class UserConsent {
+        +String id
+        +DateTime acceptedAt
+        +String ipAddress
+    }
+
+    class PromptLog {
+        +Int id
+        +String sessionId
+        +String promptText
+        +String imageBase64
+        +String provider
+        +Int durationMs
+        +String modelName
+        +String imageSize
+        +Boolean attestedEthicalUse
+        +Boolean attestedNoRealPersonMisuse
+        +SafetyStatus safetyStatus
+        +String blockedReason
+        +ViolationCategory violationCategory
+        +DateTime retentionExpiresAt
+    }
+
+    class GenerationFeedback {
+        +String id
+        +FeedbackVerdict verdict
+        +String[] tags
+        +String remark
+    }
+
+    class ContentReport {
+        +String id
+        +ViolationCategory violationCategory
+        +String details
+        +ReportStatus status
+    }
+
+    class ModerationAction {
+        +String id
+        +ModerationActionType action
+        +String reason
+        +Int promptLogId
+        +ViolationCategory violationCategory
+    }
+
+    User "1" --> "*" AuthIdentity
+    User "1" --> "*" AuthSession
+    User "0..1" --> "*" AuthEvent
+    User "1" --> "*" UserConsent
+    PolicyDocument "1" --> "*" UserConsent
+    User "0..1" --> "*" PromptLog
+    User "1" --> "*" GenerationFeedback
+    PromptLog "1" --> "0..1" GenerationFeedback
+    User "1" --> "*" ContentReport : reportsFiled
+    PromptLog "1" --> "*" ContentReport
+    User "1" --> "*" ModerationAction : target
+    User "0..1" --> "*" ModerationAction : actor
+```
+
+### Application (FastAPI)
+
+```mermaid
+classDiagram
+    class FastAPIApp {
+        +lifespan()
+        +GET /health
+    }
+
+    class AuthRouter {
+        +POST /auth/register()
+        +POST /auth/login()
+        +POST /auth/logout()
+        +GET /auth/me()
+    }
+
+    class UserRouter {
+        +GET /policies()
+        +GET /me/consents()
+        +POST /me/consents()
+        +GET /me/generations()
+        +PUT /me/generations/id/feedback()
+        +POST /me/reports()
+        +PATCH /me()
+    }
+
+    class GenerateRouter {
+        +POST /generate()
+    }
+
+    class AdminRouter {
+        +GET /admin/stats()
+        +GET /admin/analytics()
+        +GET /admin/users()
+        +PATCH /admin/users/id()
+        +GET /admin/generations()
+        +GET /admin/reports()
+        +POST /admin/moderation()
+        +GET /admin/events()
+    }
+
+    class Database {
+        +Prisma client
+        +connect()
+        +disconnect()
+    }
+
+    class Settings {
+        +String image_provider
+        +String image_size
+        +String openai_api_key
+        +String stability_api_key
+        +String huggingface_api_key
+        +Int auth_session_days
+    }
+
+    class GenerateImageRequest {
+        +String prompt
+        +ProviderName provider
+        +Boolean attested_ethical_use
+        +Boolean attested_no_real_person_misuse
+    }
+
+    class GenerateImageResponse {
+        +String image_base64
+        +String provider
+        +Int generation_id
+        +Int duration_ms
+        +String model
+    }
+
+    class PromptSafetyViolation {
+        +String category
+        +String reason
+    }
+
+    class PromptBlockedError {
+        +Int status_code
+        +String code
+        +PromptSafetyViolation violation
+    }
+
+    class ImageProvider {
+        <<interface>>
+        +generate_image(prompt) dict
+    }
+
+    class OpenAIProvider {
+        +generate_image(prompt) dict
+    }
+
+    class StabilityProvider {
+        +generate_image(prompt) dict
+    }
+
+    class HuggingFaceProvider {
+        +generate_image(prompt) dict
+    }
+
+    class ProviderFactory {
+        +get_provider_module(name)
+        +normalize_provider_name(name)
+    }
+
+    class ProviderError {
+        +String provider
+        +Int status_code
+    }
+
+    class ProviderConfigError
+    class ProviderRuntimeError
+
+    FastAPIApp --> AuthRouter
+    FastAPIApp --> UserRouter
+    FastAPIApp --> GenerateRouter
+    FastAPIApp --> AdminRouter
+    FastAPIApp --> Database
+    FastAPIApp --> Settings
+    GenerateRouter --> GenerateImageRequest
+    GenerateRouter --> GenerateImageResponse
+    GenerateRouter --> Database
+    GenerateRouter --> PromptBlockedError
+    GenerateRouter --> ProviderFactory
+    PromptBlockedError --> PromptSafetyViolation
+    ProviderFactory --> ImageProvider
+    OpenAIProvider ..|> ImageProvider
+    StabilityProvider ..|> ImageProvider
+    HuggingFaceProvider ..|> ImageProvider
+    ProviderConfigError --|> ProviderError
+    ProviderRuntimeError --|> ProviderError
+    OpenAIProvider --> Settings
+    StabilityProvider --> Settings
+    HuggingFaceProvider --> Settings
+```
+
+## ERD
+
+PostgreSQL as modeled in `backend/prisma/schema.prisma`. Image bytes live on `PromptLog.imageBase64` — there is no separate Image table. `AuthSession` is the login session; `PromptLog.sessionId` is only the client `X-Session-Id` string (not a foreign key). `ModerationAction.promptLogId` is an optional logical reference (no Prisma `@relation`).
+
+```mermaid
+erDiagram
+    User ||--o{ AuthIdentity : "has"
+    User ||--o{ AuthSession : "has"
+    User |o--o{ AuthEvent : "may have"
+    User ||--o{ UserConsent : "accepts"
+    PolicyDocument ||--o{ UserConsent : "accepted as"
+    User |o--o{ PromptLog : "owns"
+    User ||--o{ GenerationFeedback : "writes"
+    PromptLog ||--o| GenerationFeedback : "has"
+    User ||--o{ ContentReport : "files"
+    PromptLog ||--o{ ContentReport : "reported as"
+    User ||--o{ ModerationAction : "target"
+    User |o--o{ ModerationAction : "actor"
+    PromptLog |o--o{ ModerationAction : "optional"
+
+    User {
+        string id PK
+        string email UK
+        datetime emailVerifiedAt
+        string passwordHash
+        string displayName
+        UserRole role
+        AccountStatus status
+        datetime suspendedUntil
+        boolean isAdult
+        datetime ageAttestedAt
+        datetime createdAt
+        datetime updatedAt
+        datetime lastLoginAt
+    }
+
+    AuthIdentity {
+        string id PK
+        string userId FK
+        string provider
+        string providerUserId
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    AuthSession {
+        string id PK
+        string userId FK
+        string tokenHash UK
+        string ipAddress
+        string userAgent
+        datetime expiresAt
+        datetime revokedAt
+        datetime createdAt
+    }
+
+    AuthEvent {
+        string id PK
+        string userId FK
+        AuthEventType type
+        string ipAddress
+        string userAgent
+        string metadata
+        datetime createdAt
+    }
+
+    PolicyDocument {
+        string id PK
+        PolicyKind kind
+        string version
+        datetime effectiveAt
+        string summary
+        datetime createdAt
+    }
+
+    UserConsent {
+        string id PK
+        string userId FK
+        string policyDocumentId FK
+        datetime acceptedAt
+        string ipAddress
+    }
+
+    PromptLog {
+        int id PK
+        string userId FK
+        string sessionId
+        string promptText
+        string imageBase64
+        string provider
+        int durationMs
+        string modelName
+        string imageSize
+        boolean attestedEthicalUse
+        boolean attestedNoRealPersonMisuse
+        SafetyStatus safetyStatus
+        string safetyNotes
+        string blockedReason
+        ViolationCategory violationCategory
+        datetime retentionExpiresAt
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    GenerationFeedback {
+        string id PK
+        int promptLogId FK
+        string userId FK
+        FeedbackVerdict verdict
+        string tags
+        string remark
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    ContentReport {
+        string id PK
+        int promptLogId FK
+        string reporterId FK
+        ViolationCategory violationCategory
+        string details
+        ReportStatus status
+        datetime createdAt
+        datetime updatedAt
+    }
+
+    ModerationAction {
+        string id PK
+        string targetUserId FK
+        string actorId FK
+        int promptLogId
+        ModerationActionType action
+        string reason
+        ViolationCategory violationCategory
+        datetime createdAt
+    }
+```
+
+Unique composites: `AuthIdentity(provider, providerUserId)`, `PolicyDocument(kind, version)`, `UserConsent(userId, policyDocumentId)`, `GenerationFeedback.promptLogId`.
 
 ## Safety platform
 
@@ -389,15 +973,63 @@ curl -s http://localhost:8000/generate \
 ## Project structure
 
 ```text
-.
-├── backend/                 FastAPI app, Prisma schema, seed script
-│   ├── app/                 Routes, providers, consent + safety gates
-│   ├── prisma/              schema.prisma, migrations, seed.py
-│   └── .env.example
-├── frontend/                Vite + vanilla JS UI
+AI-Image-Gen/
+├── docker-compose.yml          Postgres + FastAPI + Vite
 ├── Dockerfile.backend
 ├── Dockerfile.frontend
-└── docker-compose.yml       Postgres + API + UI
+├── README.md
+│
+├── backend/                    FastAPI API (port 8000)
+│   ├── .env.example            Copy to .env; set at least one provider key
+│   ├── requirements.txt
+│   ├── prisma/
+│   │   ├── schema.prisma       Users, sessions, policies, PromptLog, …
+│   │   ├── seed.py             Admin/user accounts + policy documents
+│   │   └── migrations/
+│   ├── tests/
+│   │   ├── test_safety.py
+│   │   └── test_security.py
+│   └── app/
+│       ├── main.py             App, CORS, /health, mounts routers
+│       ├── database.py         Prisma connection
+│       ├── schemas.py          Pydantic request/response models
+│       ├── deps.py             Bearer auth, staff, consent gates
+│       ├── auth.py             Sessions, password, account checks
+│       ├── security.py         Hashing helpers
+│       ├── consent.py          Latest required policies
+│       ├── safety.py           Prompt denylist (before any provider)
+│       ├── models.py           create_prompt_log
+│       ├── serializers.py      JSON shapes for UI/admin
+│       ├── analytics.py        Admin charts
+│       ├── utils.py            Settings / IMAGE_PROVIDER
+│       ├── routes.py           POST /generate
+│       ├── routes_auth.py      /auth/register, login, logout, me
+│       ├── routes_user.py      /policies, /me/consents, gallery, reports
+│       ├── routes_admin.py     /admin/stats, users, generations, …
+│       └── providers/
+│           ├── provider_factory.py
+│           ├── openai_provider.py
+│           ├── stability_provider.py
+│           └── huggingface_provider.py
+│
+└── frontend/                   Vite + vanilla JS (port 5173)
+    ├── index.html
+    ├── main.js
+    ├── style.css
+    ├── vite.config.js
+    └── src/
+        ├── api.js              fetch + Bearer token
+        ├── auth.js             localStorage session
+        ├── router.js           Hash routes
+        ├── layout.js           Nav shells
+        ├── lightbox.js
+        ├── feedback.js
+        ├── charts.js
+        └── views/
+            ├── auth.js         Login / register / admin login
+            ├── studio.js       Generate, gallery, guidelines, account
+            ├── admin.js        Overview, users, generations, reports
+            └── help.js
 ```
 
 ## Troubleshooting
